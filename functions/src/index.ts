@@ -1,6 +1,9 @@
 export {
   createBooking,
+  createScheduledBooking,
+  cancelScheduledBooking,
   onBookingCreated,
+  onBookingPaymentReady,
   acceptOffer,
   rejectOffer,
   verifyPickupOtp,
@@ -8,8 +11,6 @@ export {
   cancelBooking,
 } from './booking';
 
-export { calculateFare, haversineKm } from './fare';
-export { generateOtp, verifyOtp } from './otp';
 export { verifyPayment, createRazorpayOrder } from './payment';
 export {
   createPriceLock,
@@ -25,7 +26,6 @@ export {
   requestPayout,
   dispatchScheduledBookings,
   onBookingUpdated,
-  settlePayouts,
+  settleDeliveredTrip,
   remindScheduledBookings,
-  commissionFor,
 } from './trust';

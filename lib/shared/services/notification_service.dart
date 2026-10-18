@@ -1,5 +1,13 @@
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/widgets.dart';
+import 'package:go_router/go_router.dart';
+
+import '../../config/router/route_names.dart';
+
+final GlobalKey<NavigatorState> appNavigatorKey = GlobalKey<NavigatorState>();
 
 
 @pragma('vm:entry-point')
@@ -64,8 +72,17 @@ class NotificationService {
     _messaging.onTokenRefresh.listen((token) {
       _saveFcmToken(token);
     });
+    FirebaseAuth.instance.authStateChanges().listen((user) {
+      if (user != null) syncCurrentToken();
+    });
 
     _isInitialized = true;
+  }
+
+  Future<void> syncCurrentToken() async {
+    if (FirebaseAuth.instance.currentUser == null) return;
+    final token = await _messaging.getToken();
+    if (token != null) await _saveFcmToken(token);
   }
 
   Future<void> setupFlutterNotifications() async {
@@ -154,12 +171,25 @@ class NotificationService {
   }
 
   void _navigateToBooking(String bookingId) {
-    // Navigation will be handled by the main app via notification tap
-    // This is a placeholder for future implementation
+    final context = appNavigatorKey.currentContext;
+    if (context == null) return;
+    context.go('${RouteNames.incomingRequest}?bookingId=${Uri.encodeComponent(bookingId)}');
   }
 
   Future<void> _saveFcmToken(String token) async {
-    // Save token to user profile in Firestore
-    // This will be implemented in the auth repository
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+    final firestore = FirebaseFirestore.instance;
+    try {
+      await firestore.collection('users').doc(user.uid).update({'fcmToken': token});
+    } catch (_) {
+      // Some accounts do not have a separate user profile document yet.
+    }
+    try {
+      final driverRef = firestore.collection('drivers').doc(user.uid);
+      if ((await driverRef.get()).exists) await driverRef.update({'fcmToken': token});
+    } catch (_) {
+      // Customer-only accounts have no driver document.
+    }
   }
 }

@@ -1,271 +1,156 @@
 rules_version = '2';
-
 service cloud.firestore {
   match /databases/{database}/documents {
-
-    function signedIn() {
-      return request.auth != null;
+    function signedIn() { return request.auth != null; }
+    function owner(uid) { return signedIn() && request.auth.uid == uid; }
+    function isAdmin() { return signedIn() && request.auth.token.role == 'admin'; }
+    function participant(data) {
+      return signedIn() &&
+        (data.customerId == request.auth.uid || data.driverId == request.auth.uid);
     }
 
-    function isOwner(uid) {
-      return signedIn() && request.auth.uid == uid;
-    }
-
-    function isDriver() {
-      return signedIn()
-        && get(/databases/$(database)/documents/drivers/$(request.auth.uid)).data.isVerified == true;
-    }
-
-    // ─── Users ───────────────────────────────────────────────────────────
     match /users/{uid} {
-      allow read: if isOwner(uid);
-      allow create: if isOwner(uid);
-      allow update: if isOwner(uid)
-        // Clients may not escalate their own role to admin-managed fields.
-        && !(request.resource.data.diff(resource.data).affectedKeys()
-              .hasAny(['createdAt']));
-      allow delete: if isOwner(uid);
+      allow read: if owner(uid) || isAdmin();
+      allow create: if owner(uid)
+        && request.resource.data.uid == uid
+        && request.resource.data.role == 'customer';
+      allow update: if owner(uid)
+        && request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['displayName', 'email', 'photoUrl', 'emergencyContact', 'fcmToken', 'updatedAt', 'phoneNumber', 'role'])
+        && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['role'])
+          || request.resource.data.role in ['customer', 'driver', 'both']);
+      allow delete: if false;
     }
 
-    // ─── Drivers ─────────────────────────────────────────────────────────
     match /drivers/{uid} {
-      allow read: if signedIn();
-      allow create: if isOwner(uid);
-      allow update: if isOwner(uid)
-        // Location/online status are driver-controlled; verification is not.
-        && !request.resource.data.diff(resource.data).affectedKeys()
-              .hasAny(['isVerified', 'userId']);
+      function assignedCustomer() {
+        return signedIn()
+          && resource.data.activeBookingId is string
+          && exists(/databases/$(database)/documents/bookings/$(resource.data.activeBookingId))
+          && get(/databases/$(database)/documents/bookings/$(resource.data.activeBookingId)).data.driverId == uid
+          && get(/databases/$(database)/documents/bookings/$(resource.data.activeBookingId)).data.customerId == request.auth.uid;
+      }
+      allow read: if owner(uid) || assignedCustomer() || isAdmin();
+      allow create: if owner(uid)
+        && request.resource.data.uid == uid
+        && request.resource.data.userId == uid
+        && request.resource.data.isVerified == false
+        && request.resource.data.isOnline == false
+        && request.resource.data.rating == 0
+        && request.resource.data.totalTrips == 0
+        && request.resource.data.keys().hasOnly([
+          'uid', 'userId', 'vehicleTypeId', 'vehicleNumber', 'vehicleModel', 'photoUrl',
+          'isOnline', 'isVerified', 'currentLat', 'currentLng', 'geohash',
+          'rating', 'totalTrips', 'totalEarnings', 'todayEarnings',
+          'weekEarnings', 'monthEarnings', 'fcmToken', 'createdAt', 'updatedAt'
+        ]);
+      allow update: if owner(uid)
+        && request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['isOnline', 'currentLocation', 'currentLat', 'currentLng', 'geohash', 'fcmToken', 'updatedAt']);
       allow delete: if false;
     }
 
-    // ─── Vehicle types (read-only catalog, managed by admin/functions) ──
-    match /vehicleTypes/{id} {
-      allow read: if signedIn();
-      allow write: if false;
+    match /driverPrivate/{uid} {
+      allow read: if owner(uid) || isAdmin();
+      allow create: if owner(uid)
+        && request.resource.data.uid == uid
+        && request.resource.data.status == 'PENDING_REVIEW'
+        && request.resource.data.keys().hasOnly([
+          'uid', 'licenseNumber', 'licenseExpiry', 'licenseFrontUrl', 'licenseBackUrl',
+          'rcNumber', 'rcExpiry', 'rcFrontUrl', 'rcBackUrl', 'aadhaarFrontUrl',
+          'aadhaarBackUrl', 'status', 'createdAt', 'updatedAt'
+        ]);
+      allow update, delete: if false;
     }
 
-    // ─── Driver offers (written by Cloud Functions; drivers listen) ──────
-    match /driverOffers/{id} {
-      allow read: if signedIn() && resource.data.driverId == request.auth.uid;
-      allow write: if false; // only Cloud Functions (admin SDK) writes
+    match /savedAddresses/{id} {
+      allow read, delete: if signedIn() && resource.data.userId == request.auth.uid;
+      allow create: if signedIn() && request.resource.data.userId == request.auth.uid;
+      allow update: if signedIn()
+        && resource.data.userId == request.auth.uid
+        && request.resource.data.userId == resource.data.userId;
     }
 
-    // ─── Bookings ────────────────────────────────────────────────────────
-    match /bookings/{id} {
-      allow read: if signedIn()
-        && (resource.data.customerId == request.auth.uid
-            || resource.data.driverId == request.auth.uid
-            || resource.data.status == 'SEARCHING');
-      // Customers create their own bookings.
-      allow create: if signedIn()
-        && request.resource.data.customerId == request.auth.uid
-        && request.resource.data.status == 'SEARCHING';
-      // Firestore-only deployment: the owning customer may update their own
-      // booking, and a driver may claim a SEARCHING booking.
-      allow update: if signedIn() && (
-        resource.data.customerId == request.auth.uid
-        || resource.data.driverId == request.auth.uid
-        || (resource.data.status == 'SEARCHING'
-            && request.resource.data.driverId == request.auth.uid)
-      );
-      allow delete: if false;
-    }
-
-    // ─── Payments ────────────────────────────────────────────────────────
+    match /bookings/{id} { allow read: if participant(resource.data) || isAdmin(); allow write: if false; }
     match /payments/{id} {
       allow read: if signedIn() && resource.data.userId == request.auth.uid;
-      allow create: if signedIn() && request.resource.data.userId == request.auth.uid;
-      // Status/result fields are written by the Razorpay verification function.
-      allow update: if false;
-      allow delete: if false;
+      allow write: if false;
+    }
+    match /driverOffers/{id} {
+      allow read: if signedIn() && resource.data.driverId == request.auth.uid;
+      allow write: if false;
+    }
+    match /scheduledBookings/{id} {
+      allow read: if signedIn() && resource.data.customerId == request.auth.uid;
+      allow write: if false;
+    }
+    match /notifications/{id} {
+      allow read: if signedIn() && resource.data.userId == request.auth.uid;
+      allow update: if signedIn() && resource.data.userId == request.auth.uid
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['readAt', 'isRead']);
+      allow create, delete: if false;
     }
 
-    // ─── Ratings ─────────────────────────────────────────────────────────
+    match /vehicleTypes/{id} { allow read: if signedIn(); allow write: if false; }
+    match /coupons/{id} { allow read: if signedIn(); allow write: if false; }
+    match /config/{id} { allow read: if signedIn(); allow write: if false; }
+    match /driverScores/{id} { allow read: if owner(id) || isAdmin(); allow write: if false; }
+    match /driverLedger/{id} {
+      allow read: if signedIn() && resource.data.driverId == request.auth.uid;
+      allow write: if false;
+    }
+    match /wallets/{uid} { allow read: if owner(uid) || isAdmin(); allow write: if false; }
     match /ratings/{id} {
       allow read: if signedIn();
       allow create: if signedIn()
         && request.resource.data.fromUserId == request.auth.uid
+        && request.resource.data.rating is number
         && request.resource.data.rating >= 1
         && request.resource.data.rating <= 5;
       allow update, delete: if false;
     }
-
-    // ─── Coupons (public catalog, admin-managed) ─────────────────────────
-    match /coupons/{id} {
-      allow read: if signedIn();
-      allow write: if false;
-    }
-
-    // ─── Saved addresses ─────────────────────────────────────────────────
-    match /savedAddresses/{id} {
-      allow read, delete: if signedIn() && resource.data.userId == request.auth.uid;
-      allow create: if signedIn() && request.resource.data.userId == request.auth.uid;
-      allow update: if signedIn() && resource.data.userId == request.auth.uid;
-    }
-
-    // ─── App config (single doc, read-only for clients) ──────────────────
-    match /config/{id} {
-      allow read: if signedIn();
-      allow write: if false;
-    }
-
-    // ─── Price locks (A1.1) ──────────────────────────────────────────────
-    match /priceLocks/{id} {
-      allow read: if signedIn() && resource.data.customerId == request.auth.uid;
-      allow create: if signedIn()
-        && request.resource.data.customerId == request.auth.uid
-        && request.resource.data.lockedFare is number
-        && request.resource.data.lockedFare >= 0;
-      allow update, delete: if false; // Cloud Functions own the lifecycle
-    }
-
-    // ─── Fare offers / bids (A1.7) ───────────────────────────────────────
-    match /fareBids/{id} {
-      allow read: if signedIn()
-        && (resource.data.customerId == request.auth.uid
-            || resource.data.driverId == request.auth.uid);
-      allow create: if signedIn()
-        && request.resource.data.customerId == request.auth.uid
-        && request.resource.data.offerFare is number;
-      allow update: if false; // drivers accept/counter via Cloud Functions
-      allow delete: if false;
-    }
-
-    // ─── Extra-cash / fraud reports (A1.4) ───────────────────────────────
     match /reports/{id} {
-      allow create: if signedIn()
-        && request.resource.data.reporterId == request.auth.uid;
       allow read: if signedIn() && resource.data.reporterId == request.auth.uid;
+      allow create: if signedIn() && request.resource.data.reporterId == request.auth.uid;
       allow update, delete: if false;
     }
-
-    // ─── Wallet (A1.4 / A2.2 credits) ────────────────────────────────────
-    match /wallets/{uid} {
-      allow read: if isOwner(uid);
-      allow create: if isOwner(uid);
-      allow update: if isOwner(uid)
-        && request.resource.data.balance is number
-        // Clients may only top-up balance in bounded increments (rewards/refunds).
-        && request.resource.data.balance <= resource.data.balance + 100;
-      allow delete: if false;
-    }
-
-    // ─── Driver reliability scores (A2.1) ────────────────────────────────
-    match /driverScores/{id} {
-      allow read: if signedIn();
-      allow write: if false; // written by Cloud Functions / admin
-    }
-
-    // ─── Driver penalties & strikes (A2.2 / A1.4) ────────────────────────
-    match /driverPenalties/{id} {
-      allow read: if signedIn()
-        && (resource.data.driverId == request.auth.uid
-            || resource.data.customerId == request.auth.uid);
-      allow create: if signedIn()
-        && (request.resource.data.driverId == request.auth.uid
-            || request.resource.data.customerId == request.auth.uid);
-      allow update, delete: if false;
-    }
-
-    // ─── Trip proofs: photos + OTP / e-signature (A3.1) ──────────────────
     match /tripProofs/{id} {
-      allow read: if signedIn()
-        && (resource.data.customerId == request.auth.uid
-            || resource.data.driverId == request.auth.uid);
-      allow create: if signedIn()
-        && (request.resource.data.customerId == request.auth.uid
-            || request.resource.data.driverId == request.auth.uid);
-      allow update: if signedIn()
-        && (resource.data.customerId == request.auth.uid
-            || resource.data.driverId == request.auth.uid);
-      allow delete: if false;
+      allow read: if participant(resource.data) || isAdmin();
+      allow write: if false;
     }
-
-    // ─── Transit insurance claims (A3.2) ─────────────────────────────────
-    match /insuranceClaims/{id} {
-      allow read: if signedIn() && resource.data.customerId == request.auth.uid;
-      allow create: if signedIn() && request.resource.data.customerId == request.auth.uid;
-      allow update: if false; // adjuster / Cloud Functions only
-      allow delete: if false;
-    }
-
-    // ─── Support tickets & live chat inbox (A4.1) ────────────────────────
     match /supportTickets/{id} {
       allow read: if signedIn() && resource.data.customerId == request.auth.uid;
       allow create: if signedIn() && request.resource.data.customerId == request.auth.uid;
-      allow update: if signedIn() && resource.data.customerId == request.auth.uid;
-      allow delete: if false;
+      allow update, delete: if false;
     }
-
-    // ─── Trip chat messages, auto-translated (A6.6) ──────────────────────
     match /chatMessages/{id} {
       allow read: if signedIn()
-        && (get(/databases/$(database)/documents/bookings/$(resource.data.bookingId)).data.customerId == request.auth.uid
-            || get(/databases/$(database)/documents/bookings/$(resource.data.bookingId)).data.driverId == request.auth.uid);
+        && (resource.data.senderId == request.auth.uid
+          || resource.data.receiverId == request.auth.uid
+          || resource.data.customerId == request.auth.uid
+          || resource.data.driverId == request.auth.uid);
       allow create: if signedIn()
-        && request.resource.data.senderId == request.auth.uid
-        && request.resource.data.bookingId is string;
+        && request.resource.data.senderId == request.auth.uid;
       allow update, delete: if false;
     }
-
-    // ─── Scheduled bookings (A6.1) ────────────────────────────────────────
-    match /scheduledBookings/{id} {
-      allow read: if signedIn() && resource.data.customerId == request.auth.uid;
-      allow create: if signedIn()
-        && request.resource.data.customerId == request.auth.uid
-        && request.resource.data.scheduledAt is timestamp;
-      allow update, delete: if signedIn() && resource.data.customerId == request.auth.uid;
-    }
-
-    // ─── Multi-stop deliveries (A6.2) ─────────────────────────────────────
-    match /multiStopBookings/{id} {
-      allow read: if signedIn()
-        && (resource.data.customerId == request.auth.uid
-            || resource.data.driverId == request.auth.uid);
-      allow create: if signedIn() && request.resource.data.customerId == request.auth.uid;
-      allow update: if signedIn()
-        && (resource.data.customerId == request.auth.uid
-            || resource.data.driverId == request.auth.uid);
-      allow delete: if false;
-    }
-
-    // ─── Business / B2B accounts (A6.4) ───────────────────────────────────
-    match /businessAccounts/{id} {
-      allow read, update: if signedIn() && resource.data.ownerId == request.auth.uid;
-      allow create: if signedIn() && request.resource.data.ownerId == request.auth.uid;
-      allow delete: if false;
-    }
-
-    // ─── Driver payouts & ledger (A5.3) ───────────────────────────────────
-    match /driverPayouts/{id} {
-      allow read: if signedIn() && resource.data.driverId == request.auth.uid;
-      allow create: if signedIn()
-        && request.resource.data.driverId == request.auth.uid
-        && request.resource.data.status == 'REQUESTED';
-      allow update, delete: if false; // settled by Cloud Functions
-    }
-
-    // ─── Referral tracking (A6.11) ────────────────────────────────────────
-    match /referrals/{id} {
-      allow read, create: if signedIn()
-        && request.resource.data.userId == request.auth.uid;
-      allow update, delete: if false;
-    }
-
-    // ─── Emergency / family safety contacts (A6.8) ────────────────────────
     match /safetyContacts/{id} {
       allow read: if signedIn() && resource.data.userId == request.auth.uid;
       allow create: if signedIn() && request.resource.data.userId == request.auth.uid;
       allow update: if signedIn() && resource.data.userId == request.auth.uid
-        && request.resource.data.userId == request.auth.uid;
+        && request.resource.data.userId == resource.data.userId;
       allow delete: if signedIn() && resource.data.userId == request.auth.uid;
     }
-
-    // ─── In-app notifications (server + owner) ────────────────────────────
-    match /notifications/{id} {
-      allow read: if signedIn() && resource.data.userId == request.auth.uid;
-      allow update: if signedIn() && resource.data.userId == request.auth.uid;
-      allow create, delete: if false; // written by Cloud Functions
+    match /driverPayouts/{id} {
+      allow read: if signedIn() && resource.data.driverId == request.auth.uid;
+      allow write: if false;
     }
+    match /referrals/{id} {
+      allow read: if signedIn() && resource.data.userId == request.auth.uid;
+      allow create: if signedIn() && request.resource.data.userId == request.auth.uid;
+      allow update, delete: if false;
+    }
+
+    // All unlisted collections are private and server-managed by default.
+    match /{collection}/{id} { allow read, write: if false; }
   }
 }

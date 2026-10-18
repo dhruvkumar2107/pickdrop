@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:go_router/go_router.dart';
 import 'package:lottie/lottie.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 import '../../../../../config/router/route_names.dart';
 import '../../../../../core/constants/app_constants.dart';
@@ -22,11 +24,15 @@ class TripCompletePage extends StatefulWidget {
     this.fare,
     this.driverName,
     this.paymentMethod,
+    this.bookingId,
+    this.driverId,
   });
 
   final double? fare;
   final String? driverName;
   final String? paymentMethod;
+  final String? bookingId;
+  final String? driverId;
 
   @override
   State<TripCompletePage> createState() => _TripCompletePageState();
@@ -91,12 +97,30 @@ class _TripCompletePageState extends State<TripCompletePage> {
     }
   }
 
-  void _submitRating() {
+  void _submitRating() async {
     if (_rating == 0) {
       AppToast.warning(context, 'Please select a star rating first');
       return;
     }
 
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    final bookingId = widget.bookingId;
+    final review = _reviewController.text.trim();
+    try {
+      await FirebaseFirestore.instance.collection('ratings').add({
+        'fromUserId': uid,
+        'bookingId': bookingId,
+        'toUserId': widget.driverId,
+        'driverId': widget.driverId,
+        'rating': _rating,
+        'review': review.isEmpty ? null : review,
+        'createdAt': FieldValue.serverTimestamp(),
+      });
+    } catch (_) {
+      // Ignore if rating cannot be persisted (rules deny, etc). Don't block navigation.
+    }
+
+    if (!mounted) return;
     AppToast.success(context, 'Thanks! Your rating was submitted');
     context.go(RouteNames.customerHome);
   }

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 import '../../../../../../config/router/route_names.dart';
 import '../../../../../../core/constants/colors.dart';
@@ -69,88 +70,30 @@ class _VehicleSelectionPageState extends ConsumerState<VehicleSelectionPage> {
     });
 
     try {
-      await Future.delayed(const Duration(milliseconds: 800));
+      final snapshot = await FirebaseFirestore.instance
+          .collection('vehicleTypes')
+          .where('isActive', isEqualTo: true)
+          .orderBy('sortOrder')
+          .get();
 
-      if (mounted) {
-        setState(() {
-          _vehicleTypes = [
-            VehicleType(
-              id: 'bike',
-              name: 'Bike',
-              icon: 'assets/icons/ic_bike.svg',
-              capacityKg: 20,
-              baseFare: 30,
-              perKmRate: 12,
-              perMinuteRate: 1.5,
-              minimumFare: 40,
-              surgeMultiplier: 1.0,
-            ),
-            VehicleType(
-              id: 'three_wheeler',
-              name: '3-Wheeler / Tata Ace',
-              icon: 'assets/icons/ic_three_wheeler.svg',
-              capacityKg: 500,
-              baseFare: 80,
-              perKmRate: 22,
-              perMinuteRate: 3,
-              minimumFare: 120,
-              surgeMultiplier: 1.0,
-            ),
-            VehicleType(
-              id: 'mini_truck',
-              name: 'Mini Truck 8ft',
-              icon: 'assets/icons/ic_mini_truck.svg',
-              capacityKg: 750,
-              baseFare: 150,
-              perKmRate: 35,
-              perMinuteRate: 5,
-              minimumFare: 250,
-              surgeMultiplier: 1.0,
-            ),
-            VehicleType(
-              id: 'pickup',
-              name: 'Pickup 9ft',
-              icon: 'assets/icons/ic_pickup.svg',
-              capacityKg: 1500,
-              baseFare: 200,
-              perKmRate: 45,
-              perMinuteRate: 6,
-              minimumFare: 350,
-              surgeMultiplier: 1.0,
-            ),
-            VehicleType(
-              id: 'large_truck',
-              name: 'Large Truck 12ft',
-              icon: 'assets/icons/ic_large_truck.svg',
-              capacityKg: 5000,
-              baseFare: 500,
-              perKmRate: 80,
-              perMinuteRate: 10,
-              minimumFare: 800,
-              surgeMultiplier: 1.0,
-            ),
-            VehicleType(
-              id: 'house_shifting',
-              name: 'House Shifting',
-              icon: 'assets/icons/ic_house_shifting.svg',
-              capacityKg: 3000,
-              baseFare: 1000,
-              perKmRate: 60,
-              perMinuteRate: 8,
-              minimumFare: 1500,
-              surgeMultiplier: 1.0,
-            ),
-          ];
-          _isLoadingVehicles = false;
-        });
-      }
-    } catch (e) {
-      if (mounted) {
-        setState(() {
-          _error = e.toString();
-          _isLoadingVehicles = false;
-        });
-      }
+      final loaded = snapshot.docs
+          .map((doc) => VehicleType.fromFirestore(doc.id, doc.data()))
+          .toList();
+
+      if (!mounted) return;
+      setState(() {
+        _vehicleTypes = loaded.isNotEmpty ? loaded : VehicleType.defaults;
+        _isLoadingVehicles = false;
+      });
+    } catch (_) {
+      // Offline or unseeded catalog: fall back to the built-in defaults so the
+      // booking flow stays usable. The server recomputes the authoritative
+      // fare on createBooking regardless of the values shown here.
+      if (!mounted) return;
+      setState(() {
+        _vehicleTypes = VehicleType.defaults;
+        _isLoadingVehicles = false;
+      });
     }
   }
 

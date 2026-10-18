@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
@@ -7,10 +8,12 @@ import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../../../../config/router/route_names.dart';
+import '../../../../../config/env/env_config.dart';
 import '../../../../../core/constants/app_constants.dart';
 import '../../../../../core/constants/colors.dart';
 import '../../../../../core/constants/strings.dart';
 import '../../../../../core/theme/design_tokens.dart';
+import '../../../../../core/utils/helpers.dart';
 import '../../../../../core/widgets/badges.dart';
 import '../../../../../core/widgets/cards.dart';
 import '../../../../../core/widgets/design_system.dart';
@@ -18,6 +21,7 @@ import '../../../../../core/widgets/app_toast.dart';
 import '../../../../../core/widgets/dialogs/dialogs.dart';
 import '../../../../../core/widgets/status_chip.dart';
 import '../../../booking/presentation/widgets/anti_extra_cash_sheet.dart';
+import '../../../booking/data/datasources/booking_remote_datasource.dart';
 import '../../../booking/presentation/widgets/free_waiting_timer_widget.dart';
 import '../../../home/presentation/widgets/live_activity_notification.dart';
 import '../widgets/proof_of_delivery_sheet.dart';
@@ -55,144 +59,152 @@ class LiveTrackingPage extends StatefulWidget {
 
 class _LiveTrackingPageState extends State<LiveTrackingPage> {
   static const int _lastStep = 6;
-  static const Duration _stepDuration = Duration(seconds: 3);
   static const String _defaultPickup = '123 MG Road, Bengaluru 560001';
   static const String _defaultDrop = '456 Koramangala, Bengaluru 560034';
-  static const String _driverName = 'Rajesh Kumar';
-  static const String _driverInitials = 'RK';
-  static const String _vehicleDetails = 'Tata Ace • KA 01 AB 1234';
-  static const String _pickupOtp = '4821';
-
-  static const LatLng _pickupPoint = LatLng(12.9716, 77.5946);
-  static const LatLng _dropPoint = LatLng(12.9352, 77.6146);
-  static const LatLng _driverStart = LatLng(12.9762, 77.5894);
-  static const LatLng _cameraCenter = LatLng(12.9548, 77.6026);
-
-  static const List<LatLng> _driverStops = <LatLng>[
-    _driverStart,
-    LatLng(12.9742, 77.5914),
-    _pickupPoint,
-    LatLng(12.9640, 77.6005),
-    LatLng(12.9530, 77.6070),
-    LatLng(12.9440, 77.6110),
-    _dropPoint,
-  ];
-
-  static const List<LatLng> _routePoints = <LatLng>[
-    _pickupPoint,
-    LatLng(12.9640, 77.6005),
-    LatLng(12.9530, 77.6070),
-    LatLng(12.9440, 77.6110),
-    _dropPoint,
-  ];
-
-  Timer? _timer;
+  LatLng get _pickupPoint => LatLng(widget.pickupLat ?? 12.9716, widget.pickupLng ?? 77.5946);
+  LatLng get _dropPoint => LatLng(widget.dropLat ?? 12.9352, widget.dropLng ?? 77.6146);
+  LatLng? _driverPoint;
+  StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _bookingSub;
+  StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _driverSub;
   int _step = 0;
-  int _holdTicks = 0;
-  Duration _stoppedFor = Duration.zero;
   ProactiveAlert? _proactiveAlert;
-  late final DateTime _expectedArrival;
+  String _bookingStatus = 'SEARCHING';
+  String _driverName = 'Your driver';
+  String _driverId = '';
+  String get _driverInitials {
+    final parts = _driverName.trim().split(RegExp(r'\s+')).where((part) => part.isNotEmpty);
+    return parts.take(2).map((part) => part[0].toUpperCase()).join();
+  }
+  String _vehicleDetails = '';
+  String _driverPhone = '';
+  String _pickupOtp = '';
+  bool _completedRoute = false;
 
   @override
   void initState() {
     super.initState();
-    _expectedArrival = DateTime.now().add(const Duration(minutes: 25));
-    _timer = Timer.periodic(_stepDuration, _onTick);
+    final bookingId = widget.bookingId;
+    if (bookingId != null && bookingId.isNotEmpty) {
+      _bookingSub = FirebaseFirestore.instance.collection('bookings').doc(bookingId)
+          .snapshots().listen(_onBookingSnapshot, onError: (Object error) {
+            if (mounted) AppToast.error(context, 'Could not load this delivery. Check your connection.');
+          });
+    }
   }
 
   @override
   void dispose() {
-    _timer?.cancel();
+    _bookingSub?.cancel();
+    _driverSub?.cancel();
     LiveActivityNotification.instance.clear();
     super.dispose();
   }
 
-  void _onTick(Timer timer) {
-    if (!mounted) {
-      timer.cancel();
-      return;
+  void _onBookingSnapshot(DocumentSnapshot<Map<String, dynamic>> snapshot) {
+    final data = snapshot.data();
+    if (data == null || !mounted) return;
+    final status = (data['status'] as String? ?? '').toUpperCase();
+    final pickup = data['pickup'];
+    final driverId = data['driverId'] as String?;
+    setState(() {
+      _bookingStatus = status;
+      _pickupOtp = pickup is Map ? (pickup['otp'] as String? ?? '') : '';
+      if (driverId != null && driverId.isNotEmpty) _driverId = driverId;
+      _step = switch (status) {
+        'DRIVER_ASSIGNED' => 0,
+        'PICKED_UP' || 'IN_TRANSIT' => 3,
+        'DELIVERED' => _lastStep,
+        _ => 0,
+      };
+    });
+    if (driverId != null && driverId.isNotEmpty && _driverSub == null) {
+      _driverSub = FirebaseFirestore.instance.collection('drivers').doc(driverId)
+          .snapshots().listen((driverDoc) {
+            final driver = driverDoc.data();
+            if (!mounted || driver == null) return;
+            final loc = driver['currentLocation'];
+            setState(() {
+              if (loc is GeoPoint) _driverPoint = LatLng(loc.latitude, loc.longitude);
+              _vehicleDetails = [driver['vehicleModel'], driver['vehicleNumber']]
+                  .whereType<String>().where((value) => value.isNotEmpty).join(' • ');
+            });
+            FirebaseFirestore.instance.collection('users').doc(driverId).get().then((userDoc) {
+              if (!mounted) return;
+              final user = userDoc.data();
+              if (user != null) {
+                setState(() {
+                  _driverName = user['displayName'] as String? ?? 'Your driver';
+                  _driverPhone = user['phoneNumber'] as String? ?? '';
+                });
+              }
+            });
+          });
     }
-
-    if (_step >= _lastStep) {
-      timer.cancel();
+    if (status == 'DELIVERED' && !_completedRoute) {
+      _completedRoute = true;
       LiveActivityNotification.instance.clear();
-      _goToTripComplete();
-      return;
-    }
-
-    final holding = _step == 3 && _holdTicks < 2;
-    if (holding) {
-      _holdTicks += 1;
-      _stoppedFor = Duration(minutes: _holdTicks * 2);
+      _goToTripComplete(data);
+    } else if (status == 'CANCELLED' || status == 'NO_DRIVER_FOUND') {
+      LiveActivityNotification.instance.clear();
+      context.go(RouteNames.customerHome);
     } else {
-      setState(() => _step += 1);
-      _stoppedFor = Duration.zero;
+      LiveActivityNotification.instance.show(
+        etaMin: _etaMinutes.round().clamp(0, 60),
+        driverName: _driverName.split(' ').first,
+        status: _statusMessage,
+      );
     }
-
-    _runProactiveChecks();
-    LiveActivityNotification.instance.show(
-      etaMin: ((_lastStep - _step) * 3).clamp(1, 30),
-      driverName: _driverName.split(' ').first,
-      status: _step < 3 ? 'On the way to pickup' : 'Heading to your drop',
-    );
   }
 
-  void _runProactiveChecks() {
-    final current = _driverStops[_step];
-    final previous = _driverStops[_step > 0 ? _step - 1 : 0];
-    final alerts = const ProactiveAlertService().evaluate(
-      driverLat: current.latitude,
-      driverLng: current.longitude,
-      prevLat: previous.latitude,
-      prevLng: previous.longitude,
-      isStopped: _holdTicks > 0 && _step == 3,
-      stoppedFor: _stoppedFor,
-      expectedArrival: _expectedArrival,
-      now: DateTime.now(),
-    );
-
-    if (alerts.isEmpty || _proactiveAlert != null) return;
-    setState(() => _proactiveAlert = alerts.first);
-  }
-
-  void _goToTripComplete() {
+  void _goToTripComplete([Map<String, dynamic>? booking]) {
     if (!mounted) return;
 
-    final fare = (widget.fare ?? 399).toStringAsFixed(0);
+    final breakdown = booking?['fareBreakdown'];
+    final savedFare = breakdown is Map ? breakdown['total'] : null;
+    final fare = ((savedFare as num?)?.toDouble() ?? widget.fare ?? 0).toStringAsFixed(0);
     final driver = Uri.encodeComponent(_driverName);
     final payment = Uri.encodeComponent(widget.paymentMethod ?? 'cod');
 
-    context.go('${RouteNames.tripComplete}?fare=$fare&driver=$driver&paymentMethod=$payment');
+    context.go('${RouteNames.tripComplete}?fare=$fare&driver=$driver&paymentMethod=$payment&bookingId=${Uri.encodeComponent(widget.bookingId ?? '')}&driverId=${Uri.encodeComponent(_driverId)}');
   }
 
   String get _status {
-    if (_step >= 3) return AppConstants.statusInTransit;
-    if (_step == 2) return AppConstants.statusArrived;
-    return AppConstants.statusDriverAssigned;
+    if (_bookingStatus == 'PICKED_UP' || _bookingStatus == 'IN_TRANSIT') return AppConstants.statusInTransit;
+    if (_bookingStatus == 'DRIVER_ASSIGNED') return AppConstants.statusDriverAssigned;
+    return 'Searching';
   }
 
   String get _statusMessage {
     if (_status == AppConstants.statusInTransit) return AppStrings.inTransit;
-    if (_status == AppConstants.statusArrived) return AppStrings.driverArrived;
     return AppStrings.driverArriving;
   }
 
   int get _statusIndex {
     if (_status == AppConstants.statusInTransit) return 2;
-    if (_status == AppConstants.statusArrived) return 1;
     return 0;
   }
 
   String get _etaLabel {
-    if (_status == AppConstants.statusArrived) return 'Arriving now';
-    if (_status == AppConstants.statusInTransit) return '18 min to drop';
-    return '8 min away';
+    if (_status == AppConstants.statusInTransit) return 'Delivery in progress';
+    if (_status == AppConstants.statusDriverAssigned) return 'Driver assigned';
+    return 'Finding a driver';
   }
 
   double get _etaMinutes {
-    if (_status == AppConstants.statusArrived) return 0;
-    if (_status == AppConstants.statusInTransit) return 18;
-    return 8;
+    final driver = _driverPoint;
+    if (driver == null) return 0;
+    final target = _status == AppConstants.statusInTransit ? _dropPoint : _pickupPoint;
+    final metres = AppHelpers.calculateDistance(
+      driver.latitude,
+      driver.longitude,
+      target.latitude,
+      target.longitude,
+    );
+    // Assume ~25 km/h average city speed for a light delivery vehicle.
+    const metresPerMinute = 25 * 1000 / 60;
+    final minutes = metres / metresPerMinute;
+    if (!minutes.isFinite || minutes < 0) return 0;
+    return minutes;
   }
 
   String get _pickupLabel => widget.pickupAddress ?? _defaultPickup;
@@ -209,7 +221,7 @@ Drop: $_dropLabel
 Status: $_statusMessage
 ETA: $_etaLabel
 
-Track live: https://pickdrop.in/track/${widget.pickupLat ?? 12.9716},${widget.pickupLng ?? 77.5946}
+Track live: ${EnvConfig.trackingBaseUrl}/track/${widget.bookingId ?? ''}
 ''';
 
     await SharePlus.instance.share(
@@ -221,21 +233,24 @@ Track live: https://pickdrop.in/track/${widget.pickupLat ?? 12.9716},${widget.pi
   }
 
   void _callDriver() {
-    AppToast.info(context, 'Calling $_driverName...');
+    if (_driverPhone.isEmpty) {
+      AppToast.info(context, 'The driver has not shared a call number.');
+      return;
+    }
+    launchUrl(Uri(scheme: 'tel', path: _driverPhone));
   }
 
   Future<void> _triggerSOS() async {
     final confirmed = await AppDialog.showConfirmation(
       context: context,
       title: 'Activate SOS?',
-      message: 'This will share your live location with your emergency contact and alert support.',
+      message: 'This will open your phone app to call emergency services. PickDrop will not notify a contact automatically.',
       confirmText: 'Yes, activate SOS',
       isDestructive: true,
     );
 
     if (!mounted) return;
     if (confirmed ?? false) {
-      AppToast.success(context, 'SOS activated! Emergency contact notified with your location.');
       final uri = Uri(scheme: 'tel', path: '112');
       if (await canLaunchUrl(uri)) {
         await launchUrl(uri);
@@ -270,8 +285,12 @@ Track live: https://pickdrop.in/track/${widget.pickupLat ?? 12.9716},${widget.pi
 
     if (!mounted) return;
     if (confirmed ?? false) {
-      _timer?.cancel();
-      context.go(RouteNames.customerHome);
+      try {
+        await BookingRemoteDataSource().cancelBooking(widget.bookingId ?? '');
+        if (mounted) context.go(RouteNames.customerHome);
+      } catch (_) {
+        if (mounted) AppToast.error(context, 'Could not cancel. Check your connection and try again.');
+      }
     }
   }
 
@@ -291,9 +310,9 @@ Track live: https://pickdrop.in/track/${widget.pickupLat ?? 12.9716},${widget.pi
         icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed),
         infoWindow: InfoWindow(title: 'Drop', snippet: _dropLabel),
       ),
-      Marker(
+      if (_driverPoint != null) Marker(
         markerId: const MarkerId('driver'),
-        position: _driverStops[_step],
+        position: _driverPoint!,
         icon: BitmapDescriptor.defaultMarkerWithHue(
           BitmapDescriptor.hueOrange,
         ),
@@ -306,14 +325,14 @@ Track live: https://pickdrop.in/track/${widget.pickupLat ?? 12.9716},${widget.pi
     return {
       Polyline(
         polylineId: const PolylineId('approach'),
-        points: const [_driverStart, _pickupPoint],
+        points: [_driverPoint ?? _pickupPoint, _pickupPoint],
         color: colors.primary.withValues(alpha: 0.5),
         width: 3,
         patterns: [PatternItem.dash(14), PatternItem.gap(8)],
       ),
       Polyline(
         polylineId: const PolylineId('route'),
-        points: _routePoints,
+        points: [_pickupPoint, _dropPoint],
         color: colors.primary,
         width: 5,
         jointType: JointType.round,
@@ -387,8 +406,11 @@ Track live: https://pickdrop.in/track/${widget.pickupLat ?? 12.9716},${widget.pi
       body: Stack(
         children: [
           GoogleMap(
-            initialCameraPosition: const CameraPosition(
-              target: _cameraCenter,
+            initialCameraPosition: CameraPosition(
+              target: LatLng(
+                (_pickupPoint.latitude + _dropPoint.latitude) / 2,
+                (_pickupPoint.longitude + _dropPoint.longitude) / 2,
+              ),
               zoom: AppConstants.defaultMapZoom,
             ),
             markers: _buildMarkers(),
@@ -707,7 +729,7 @@ Track live: https://pickdrop.in/track/${widget.pickupLat ?? 12.9716},${widget.pi
                   ),
                 ),
                 child: Text(
-                  _pickupOtp[index],
+                  index < _pickupOtp.length ? _pickupOtp[index] : '–',
                   style: TokenTextStyles.priceSmall(
                     color: colors.onSurface,
                     letterSpacing: 2,

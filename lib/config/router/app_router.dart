@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../shared/services/notification_service.dart';
+
 import '../../features/auth/presentation/pages/splash_page.dart';
 import '../../features/auth/presentation/pages/onboarding_page.dart';
 import '../../features/auth/presentation/pages/phone_login_page.dart';
@@ -44,6 +46,7 @@ import 'route_names.dart';
 
 final appRouterProvider = Provider<GoRouter>((ref) {
   return GoRouter(
+    navigatorKey: appNavigatorKey,
     initialLocation: RouteNames.splash,
     debugLogDiagnostics: true,
     routes: [
@@ -198,6 +201,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         builder: (context, state) {
           final q = state.uri.queryParameters;
           return LiveTrackingPage(
+            bookingId: q['bookingId'],
             fare: double.tryParse(q['fare'] ?? ''),
             pickupAddress: q['pickupAddress'],
             dropAddress: q['dropAddress'],
@@ -218,6 +222,8 @@ final appRouterProvider = Provider<GoRouter>((ref) {
             fare: double.tryParse(q['fare'] ?? ''),
             driverName: q['driver'],
             paymentMethod: q['paymentMethod'],
+            bookingId: q['bookingId'],
+            driverId: q['driverId'],
           );
         },
       ),
@@ -305,12 +311,16 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: RouteNames.incomingRequest,
         name: 'incomingRequest',
-        builder: (context, state) => const IncomingRequestPage(),
+        builder: (context, state) => IncomingRequestPage(
+          bookingId: state.uri.queryParameters['bookingId'] ?? '',
+        ),
       ),
       GoRoute(
         path: RouteNames.activeTrip,
         name: 'activeTrip',
-        builder: (context, state) => const ActiveTripPage(),
+        builder: (context, state) => ActiveTripPage(
+          bookingId: state.uri.queryParameters['bookingId'] ?? '',
+        ),
       ),
       GoRoute(
         path: RouteNames.driverEarnings,

@@ -5,7 +5,6 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import 'config/env/env_config.dart';
 import 'config/firebase/firebase_options.dart';
 import 'config/router/app_router.dart';
 import 'core/constants/colors.dart';
@@ -18,25 +17,24 @@ import 'shared/services/notification_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await dotenv.load(fileName: '.env');
-
+  Object? bootstrapError;
   try {
+    await dotenv.load(fileName: '.env');
     await Firebase.initializeApp(
       options: DefaultFirebaseOptions.currentPlatform,
     );
-  } catch (_) {
-    debugPrint('Firebase initialization skipped or failed in local demo mode.');
+    await NotificationService().initialize();
+  } catch (error) {
+    bootstrapError = error;
   }
 
-  if (EnvConfig.isFirebaseConfigured) {
-    try {
-      await NotificationService().initialize();
-    } catch (_) {
-      debugPrint('Notification initialization skipped in local demo mode.');
-    }
-  }
-
-  runApp(const ProviderScope(child: PickDropApp()));
+  runApp(
+    ProviderScope(
+      child: bootstrapError == null
+          ? const PickDropApp()
+          : BootstrapFailureApp(error: bootstrapError),
+    ),
+  );
 }
 
 class PickDropApp extends ConsumerWidget {
@@ -61,11 +59,7 @@ class PickDropApp extends ConsumerWidget {
         GlobalWidgetsLocalizations.delegate,
         GlobalCupertinoLocalizations.delegate,
       ],
-      supportedLocales: const [
-        Locale('en'),
-        Locale('hi'),
-        Locale('kn'),
-      ],
+      supportedLocales: const [Locale('en'), Locale('hi'), Locale('kn')],
       locale: locale,
       builder: (context, child) {
         final media = MediaQuery.of(context);
@@ -108,13 +102,49 @@ class PickDropApp extends ConsumerWidget {
                 ),
               ],
             ),
-            child: MediaQuery(
-              data: frameMedia,
-              child: content,
-            ),
+            child: MediaQuery(data: frameMedia, child: content),
           ),
         );
       },
     );
   }
+}
+
+class BootstrapFailureApp extends StatelessWidget {
+  const BootstrapFailureApp({super.key, required this.error});
+
+  final Object? error;
+
+  @override
+  Widget build(BuildContext context) => MaterialApp(
+    home: Scaffold(
+      body: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.cloud_off, size: 48),
+              const SizedBox(height: 16),
+              const Text(
+                'PickDrop is not configured',
+                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 8),
+              const Text(
+        'Copy .env.example to .env, configure a Firebase project, then restart the app.',
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 12),
+              Text(
+                '$error',
+                textAlign: TextAlign.center,
+                style: const TextStyle(fontSize: 12, color: Colors.black54),
+              ),
+            ],
+          ),
+        ),
+      ),
+    ),
+  );
 }

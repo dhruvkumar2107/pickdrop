@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_animate/flutter_animate.dart';
@@ -105,25 +106,17 @@ class _FindingDriverPageState extends ConsumerState<FindingDriverPage>
           .read(bookingRemoteDataSourceProvider)
           .watchBookingStatus(widget.bookingId)
           .listen(_onBookingStatus);
-      // Firestore-only build: if no driver claims the job shortly, assign a
-      // demo driver so the delivery flow completes.
-      _matchTimer = Timer(const Duration(seconds: 7), _assignDemoDriver);
     } else {
-      // Demo mode: simulate a driver accepting the request.
-      _matchTimer = Timer(const Duration(seconds: 6), _onDriverFound);
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          AppToast.error(
+            context,
+            'A valid booking is required to find a driver.',
+          );
+          _goHome();
+        }
+      });
     }
-  }
-
-  Future<void> _assignDemoDriver() async {
-    if (!mounted || _driverFound) return;
-    try {
-      await ref
-          .read(bookingRemoteDataSourceProvider)
-          .acceptBooking(widget.bookingId, driverId: 'demo-driver-01');
-    } catch (e) {
-      debugPrint('demo driver assignment failed: $e');
-    }
-    if (mounted) _onDriverFound();
   }
 
   void _onBookingStatus(String status) {
@@ -174,9 +167,11 @@ class _FindingDriverPageState extends ConsumerState<FindingDriverPage>
       'dropLat': widget.dropLat.toString(),
       'dropLng': widget.dropLng.toString(),
       'paymentMethod': widget.paymentMethod,
+      'bookingId': widget.bookingId,
     };
-    final encoded =
-        q.entries.map((e) => '${e.key}=${Uri.encodeComponent(e.value)}').join('&');
+    final encoded = q.entries
+        .map((e) => '${e.key}=${Uri.encodeComponent(e.value)}')
+        .join('&');
     context.go('${RouteNames.liveTracking}?$encoded');
   }
 
