@@ -1,0 +1,25 @@
+{
+  "name": "pickdrop-functions",
+  "description": "PickDrop Cloud Functions — fare, matching, OTP, cancellation, payments",
+  "private": true,
+  "engines": {
+    "node": "20"
+  },
+  "main": "lib/index.js",
+  "scripts": {
+    "build": "tsc",
+    "watch": "tsc --watch",
+    "serve": "npm run build && firebase emulators:start --only functions,firestore,auth",
+    "deploy": "firebase deploy --only functions",
+    "logs": "firebase functions:log",
+    "seed": "node ../scripts/seed.js"
+  },
+  "dependencies": {
+    "firebase-admin": "^12.6.0",
+    "firebase-functions": "^6.1.0",
+    "razorpay": "^2.9.8"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0"
+  }
+}

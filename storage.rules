@@ -1,0 +1,40 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(uid) {
+      return signedIn() && request.auth.uid == uid;
+    }
+
+    function isImage() {
+      return request.resource.contentType.matches('image/.*')
+        && request.resource.size < 5 * 1024 * 1024;
+    }
+
+    // Driver documents: KYC uploads (Aadhaar, license, RC, photo).
+    // Each driver may only write inside their own folder.
+    match /drivers/{uid}/{fileName} {
+      allow read: if signedIn()
+        && (request.auth.uid == uid || request.auth.token.role == 'admin');
+      allow write: if isOwner(uid) && isImage();
+      allow delete: if isOwner(uid);
+    }
+
+    // User avatars
+    match /users/{uid}/{fileName} {
+      allow read: if signedIn();
+      allow write: if isOwner(uid) && isImage();
+      allow delete: if isOwner(uid);
+    }
+
+    // Everything else is not accessible from clients.
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}
