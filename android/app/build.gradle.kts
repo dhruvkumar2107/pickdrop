@@ -60,12 +60,12 @@ android {
 
     buildTypes {
         release {
-            // Falls back to debug keys so `flutter run --release` works out of the box.
-            signingConfig = if (keystorePropertiesFile.exists()) {
-                signingConfigs.getByName("release")
-            } else {
-                signingConfigs.getByName("debug")
+            // Release artifacts must never be debug-signed. CI provides key.properties
+            // from repository secrets; local release builds require the owner key.
+            if (!keystorePropertiesFile.exists()) {
+                throw GradleException("Missing android/key.properties; release signing is required.")
             }
+            signingConfig = signingConfigs.getByName("release")
             // Shrink + obfuscate release builds.
             isMinifyEnabled = true
             isShrinkResources = true
