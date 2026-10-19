@@ -31,3 +31,13 @@ CI pinned to Flutter 3.47.1 (matching local). Release signing fails closed. Defa
 - Vehicle selection must read `vehicleTypes` (server-pricing source of truth).
 - Avoid shipping `hi` locale if `strings_hi.dart` absent; either remove `hi` from supported locales or add strings file.
 - Driver payout read restricted to owner; write only via `requestPayout` callable.
+
+
+## 2026-10-19 - English-only UI for now
+The `hi`/`kn` locales were non-functional and the Kannada strings file was corrupted (mixed Korean/garbled text). Shipped English-only: removed the corrupted strings file, trimmed supported locales to `en`, and the language page shows one option plus a coming-soon note. Re-add languages only with complete, reviewed translations.
+
+## 2026-10-19 - Webhook reconciles booking payments
+`razorpayPaymentWebhook` now settles booking payments (idempotent `settleBookingPayment`) as well as wallet top-ups, so a closed app still settles. Payouts still never auto-complete.
+
+## 2026-10-19 - Account deletion
+`deleteAccount` callable refuses while an active trip, pending payout, or processing top-up exists; deletes personal docs, anonymizes the users doc, and deletes the Auth user. Financial records are retained for accounting.
