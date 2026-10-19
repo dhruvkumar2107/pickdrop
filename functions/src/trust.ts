@@ -122,36 +122,54 @@ export const createSosAlert = onCall<{ latitude?: number; longitude?: number; no
   const hasLocation = Number.isFinite(latitude) && Number.isFinite(longitude) &&
     Number(latitude) >= -90 && Number(latitude) <= 90 && Number(longitude) >= -180 && Number(longitude) <= 180;
   const db = getFirestore();
-  const recent = await db.collection('bookings').where('customerId', '==', uid).limit(50).get();
-  const booking = recent.docs.find((doc) => ['DRIVER_ASSIGNED', 'PICKED_UP'].includes(String(doc.data().status)));
+  const activeStatuses = ['DRIVER_ASSIGNED', 'PICKED_UP'];
+  const asCustomer = await db.collection('bookings').where('customerId', '==', uid).limit(50).get();
+  let booking = asCustomer.docs.find((doc) => activeStatuses.includes(String(doc.data().status)));
+  let role = 'customer';
+  let counterpartyId = booking?.data().driverId ? String(booking.data().driverId) : undefined;
+  if (!booking) {
+    const asDriver = await db.collection('bookings').where('driverId', '==', uid).limit(50).get();
+    booking = asDriver.docs.find((doc) => activeStatuses.includes(String(doc.data().status)));
+    if (booking) {
+      role = 'driver';
+      counterpartyId = String(booking.data().customerId);
+    }
+  }
   const ref = db.collection('sosAlerts').doc();
   await ref.create({
     userId: uid,
+    role,
     bookingId: booking?.id ?? null,
-    driverId: booking?.data().driverId ?? null,
+    driverId: booking?.data().driverId ?? (role === 'driver' ? uid : null),
     status: 'OPEN',
     note: String(note).slice(0, 300),
     ...(hasLocation ? { location: { latitude, longitude } } : {}),
     createdAt: Timestamp.now(),
   });
-  if (booking?.data().driverId) {
-    const driver = await db.collection('drivers').doc(String(booking.data().driverId)).get();
-    const token = driver.data()?.fcmToken;
+  if (counterpartyId) {
+    const counterpartyCollection = role === 'customer' ? 'drivers' : 'users';
+    const counterparty = await db.collection(counterpartyCollection).doc(counterpartyId).get();
+    const token = counterparty.data()?.fcmToken;
     if (typeof token === 'string' && token) {
       try {
         await getMessaging().send({
           token,
-          notification: { title: 'PickDrop safety alert', body: 'A customer on your active trip requested emergency help.' },
-          data: { type: 'sos_alert', bookingId: booking.id, alertId: ref.id },
+          notification: {
+            title: 'PickDrop safety alert',
+            body: role === 'customer'
+              ? 'A customer on your active trip requested emergency help.'
+              : 'Your driver requested emergency help. Contact them and support if needed.',
+          },
+          data: { type: 'sos_alert', bookingId: booking!.id, alertId: ref.id },
           android: { priority: 'high', notification: { channelId: 'booking_updates' } },
           apns: { payload: { aps: { sound: 'default' } } },
         });
       } catch (error) {
-        console.warn(`SOS push failed for active booking ${booking.id}`, error);
+        console.warn(`SOS push failed for active booking ${booking!.id}`, error);
       }
     }
   }
-  return { alertId: ref.id, recorded: true, activeTrip: Boolean(booking) };
+  return { alertId: ref.id, recorded: true, activeTrip: Boolean(booking), role };
 });
 
 /** Returns a stable account referral code and registers its owner server-side. */

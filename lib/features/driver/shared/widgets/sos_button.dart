@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
-import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -9,6 +9,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../../../config/env/env_config.dart';
 import '../../../../core/constants/colors.dart';
 import '../../../../core/constants/strings.dart';
 import '../../../../core/theme/design_tokens.dart';
@@ -112,19 +113,14 @@ class _SosButtonState extends State<SosButton>
     final lat = event['lat'];
     final lng = event['lng'];
     try {
-      await FirebaseFirestore.instance.collection('reports').add(
-        <String, dynamic>{
-          'type': AppStrings.sos,
-          'reporterId': uid,
-          'driverId': uid,
-          'status': 'OPEN',
-          'source': 'driver_app',
-          'createdAt': FieldValue.serverTimestamp(),
-          'tripMetadata': event,
-          if (lat is double && lng is double)
-            'location': GeoPoint(lat, lng),
-        },
-      );
+      final callable = FirebaseFunctions.instanceFor(
+        region: EnvConfig.functionsRegion,
+      ).httpsCallable('createSosAlert');
+      await callable.call(<String, dynamic>{
+        if (lat is double) 'latitude': lat,
+        if (lng is double) 'longitude': lng,
+        'note': 'Driver SOS',
+      });
     } catch (_) {
       return;
     }

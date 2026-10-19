@@ -390,7 +390,7 @@ class _AdminReviewPageState extends State<AdminReviewPage> {
                         return Card(
                           child: ListTile(
                             title: Text(
-                              'Customer ${data['userId']} • trip ${data['bookingId'] ?? 'not attached'}',
+                              '${data['role'] == 'driver' ? 'Driver' : 'Customer'} ${data['userId']} • trip ${data['bookingId'] ?? 'not attached'}',
                             ),
                             subtitle: Text(
                               'Created ${_date(data['createdAt'])} • location ${location == null ? 'unavailable' : '${location['latitude']}, ${location['longitude']}'}',
