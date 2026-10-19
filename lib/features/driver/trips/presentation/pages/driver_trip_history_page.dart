@@ -64,7 +64,7 @@ class _DriverTripHistoryPageState extends State<DriverTripHistoryPage> {
         _trips = trips;
         _ledgerEarnings = results[1].docs.fold<double>(
           0,
-          (sum, d) => sum + ((d.data()['net'] as num?)?.toDouble() ?? 0),
+          (running, d) => running + ((d.data()['net'] as num?)?.toDouble() ?? 0),
         );
         _loading = false;
       });

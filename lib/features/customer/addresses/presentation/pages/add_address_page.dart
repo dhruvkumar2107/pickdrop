@@ -82,11 +82,12 @@ class _AddAddressPageState extends State<AddAddressPage> {
       AppToast.success(context, 'Address saved');
       context.pop();
     } catch (_) {
-      if (mounted)
+      if (mounted) {
         AppToast.error(
           context,
           'Could not save the address. Please try again.',
         );
+      }
     }
   }
 

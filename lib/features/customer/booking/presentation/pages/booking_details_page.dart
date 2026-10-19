@@ -164,11 +164,12 @@ class _BookingDetailsPageState extends ConsumerState<BookingDetailsPage> {
           .doc(uid)
           .snapshots()
           .listen((snapshot) {
-            if (mounted)
+            if (mounted) {
               setState(
                 () => _walletBalance =
                     (snapshot.data()?['balance'] as num?)?.toDouble() ?? 0,
               );
+            }
           });
     }
     _loadQuote();
@@ -187,12 +188,13 @@ class _BookingDetailsPageState extends ConsumerState<BookingDetailsPage> {
       });
       return;
     }
-    if (mounted)
+    if (mounted) {
       setState(() {
         _quoteLoading = true;
         _quote = null;
         _quoteError = null;
       });
+    }
     try {
       final quote = await ref
           .read(bookingRemoteDataSourceProvider)
@@ -212,19 +214,21 @@ class _BookingDetailsPageState extends ConsumerState<BookingDetailsPage> {
                       .toList()
                 : const [],
           );
-      if (mounted && requestId == _quoteRequest)
+      if (mounted && requestId == _quoteRequest) {
         setState(() {
           _quote = quote;
           _quoteLoading = false;
           _quoteError = null;
         });
+      }
     } catch (_) {
-      if (mounted && requestId == _quoteRequest)
+      if (mounted && requestId == _quoteRequest) {
         setState(() {
           _quoteLoading = false;
           _quoteError =
               'Unable to calculate a live fare. Please go back and try again.';
         });
+      }
     }
   }
 
@@ -420,11 +424,12 @@ class _BookingDetailsPageState extends ConsumerState<BookingDetailsPage> {
         }
       } catch (error) {
         debugPrint('schedule failed: $error');
-        if (mounted)
+        if (mounted) {
           AppToast.error(
             context,
             'Could not schedule the delivery. Check the pickup time and try again.',
           );
+        }
       } finally {
         if (mounted) setState(() => _bookingInProgress = false);
       }

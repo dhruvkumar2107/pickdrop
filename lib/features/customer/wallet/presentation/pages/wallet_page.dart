@@ -73,11 +73,12 @@ class _WalletPageState extends State<WalletPage> {
           .doc(uid)
           .snapshots()
           .listen((snapshot) {
-            if (mounted)
+            if (mounted) {
               setState(
                 () => _balance =
                     (snapshot.data()?['balance'] as num?)?.toDouble() ?? 0,
               );
+            }
           });
       _transactionsSubscription = FirebaseFirestore.instance
           .collection('walletTransactions')
@@ -176,11 +177,12 @@ class _WalletPageState extends State<WalletPage> {
         customerPhone: user.phoneNumber ?? '',
       );
     } catch (e) {
-      if (mounted)
+      if (mounted) {
         AppToast.error(
           context,
           'Could not start wallet top-up. ${e is StateError ? e.message : ''}',
         );
+      }
       if (mounted) setState(() => _topupInProgress = false);
     }
   }
@@ -189,8 +191,9 @@ class _WalletPageState extends State<WalletPage> {
     final orderId = _pendingOrderId;
     if (orderId == null ||
         response.paymentId == null ||
-        response.signature == null)
+        response.signature == null) {
       return;
+    }
     final paid = await _razorpayService.verifyWalletPayment(
       orderId: orderId,
       paymentId: response.paymentId!,
@@ -201,13 +204,14 @@ class _WalletPageState extends State<WalletPage> {
       _topupInProgress = false;
       _pendingOrderId = null;
     });
-    if (paid)
+    if (paid) {
       AppToast.success(context, 'Wallet top-up received.');
-    else
+    } else {
       AppToast.error(
         context,
         'Payment could not be verified. Contact support with your payment ID.',
       );
+    }
   }
 
   void _openCoupons() {

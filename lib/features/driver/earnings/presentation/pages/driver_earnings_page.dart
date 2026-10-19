@@ -316,7 +316,7 @@ class _DriverEarningsPageState extends State<DriverEarningsPage>
                   _EarningStat(
                     label: 'Avg / Trip',
                     value:
-                        '₹${_transactions.isEmpty ? '0' : (_transactions.fold<double>(0, (sum, item) => sum + (item['amount'] as num).toDouble()) / _transactions.length).toStringAsFixed(0)}',
+                        '₹${_transactions.isEmpty ? '0' : (_transactions.fold<double>(0, (running, item) => running + (item['amount'] as num).toDouble()) / _transactions.length).toStringAsFixed(0)}',
                   ),
                   const SizedBox(width: AppDimensions.spacingMd),
                   const _EarningStat(label: 'Rating', value: 'See profile'),
@@ -362,12 +362,13 @@ class _DriverEarningsPageState extends State<DriverEarningsPage>
           SliverList(
             delegate: SliverChildBuilderDelegate(
               (_, i) {
-                if (_loading)
+                if (_loading) {
                   return const Padding(
                     padding: EdgeInsets.all(24),
                     child: Center(child: CircularProgressIndicator()),
                   );
-                if (_transactions.isEmpty)
+                }
+                if (_transactions.isEmpty) {
                   return const Padding(
                     padding: EdgeInsets.all(24),
                     child: Center(
@@ -377,6 +378,7 @@ class _DriverEarningsPageState extends State<DriverEarningsPage>
                       ),
                     ),
                   );
+                }
                 final tx = _transactions[i];
                 return _TransactionTile(tx: tx)
                     .animate(delay: Duration(milliseconds: i * 80))

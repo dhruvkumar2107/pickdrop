@@ -190,8 +190,9 @@ class _LiveTrackingPageState extends State<LiveTrackingPage> {
             if (!mounted || driver == null) return;
             final loc = driver['currentLocation'];
             setState(() {
-              if (loc is GeoPoint)
+              if (loc is GeoPoint) {
                 _driverPoint = LatLng(loc.latitude, loc.longitude);
+              }
               _vehicleDetails =
                   [driver['vehicleModel'], driver['vehicleNumber']]
                       .whereType<String>()
@@ -247,10 +248,12 @@ class _LiveTrackingPageState extends State<LiveTrackingPage> {
   }
 
   String get _status {
-    if (_bookingStatus == 'PICKED_UP' || _bookingStatus == 'IN_TRANSIT')
+    if (_bookingStatus == 'PICKED_UP' || _bookingStatus == 'IN_TRANSIT') {
       return AppConstants.statusInTransit;
-    if (_bookingStatus == 'DRIVER_ASSIGNED')
+    }
+    if (_bookingStatus == 'DRIVER_ASSIGNED') {
       return AppConstants.statusDriverAssigned;
+    }
     return 'Searching';
   }
 
@@ -385,11 +388,12 @@ Track live: $trackingUrl
         await BookingRemoteDataSource().cancelBooking(widget.bookingId ?? '');
         if (mounted) context.go(RouteNames.customerHome);
       } catch (_) {
-        if (mounted)
+        if (mounted) {
           AppToast.error(
             context,
             'Could not cancel. Check your connection and try again.',
           );
+        }
       }
     }
   }

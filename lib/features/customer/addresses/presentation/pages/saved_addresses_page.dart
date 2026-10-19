@@ -44,17 +44,20 @@ class SavedAddressesPage extends StatelessWidget {
                   .where('userId', isEqualTo: uid)
                   .snapshots(),
               builder: (context, snapshot) {
-                if (snapshot.hasError)
+                if (snapshot.hasError) {
                   return const Center(
                     child: Text('Could not load saved addresses.'),
                   );
-                if (!snapshot.hasData)
+                }
+                if (!snapshot.hasData) {
                   return const Center(child: CircularProgressIndicator());
+                }
                 final docs = snapshot.data!.docs;
-                if (docs.isEmpty)
+                if (docs.isEmpty) {
                   return _EmptyState(
                     onAdd: () => context.push(RouteNames.addAddress),
                   );
+                }
                 return ListView.builder(
                   padding: const EdgeInsets.all(AppDimensions.spacingXl),
                   itemCount: docs.length,

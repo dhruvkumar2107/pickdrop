@@ -28,14 +28,16 @@ class _AdminReviewPageState extends State<AdminReviewPage> {
     try {
       final user = FirebaseAuth.instance.currentUser;
       final claims = await user?.getIdTokenResult(true);
-      if (mounted)
+      if (mounted) {
         setState(() => _isAdmin = claims?.claims?['role'] == 'admin');
+      }
     } catch (_) {
-      if (mounted)
+      if (mounted) {
         setState(() {
           _isAdmin = false;
           _error = 'Could not verify admin access.';
         });
+      }
     }
   }
 
@@ -47,11 +49,13 @@ class _AdminReviewPageState extends State<AdminReviewPage> {
     try {
       await _functions.httpsCallable(callable).call(payload);
     } on FirebaseFunctionsException catch (e) {
-      if (mounted)
+      if (mounted) {
         setState(() => _error = e.message ?? 'Review action failed.');
+      }
     } catch (_) {
-      if (mounted)
+      if (mounted) {
         setState(() => _error = 'Review action failed. Please retry.');
+      }
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -66,7 +70,7 @@ class _AdminReviewPageState extends State<AdminReviewPage> {
       final result = await _functions
           .httpsCallable('seedBusinessDefaults')
           .call<Map<String, dynamic>>();
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
@@ -74,11 +78,13 @@ class _AdminReviewPageState extends State<AdminReviewPage> {
             ),
           ),
         );
+      }
     } on FirebaseFunctionsException catch (e) {
-      if (mounted)
+      if (mounted) {
         setState(
           () => _error = e.message ?? 'Could not initialize vehicle pricing.',
         );
+      }
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -144,13 +150,15 @@ class _AdminReviewPageState extends State<AdminReviewPage> {
 
   @override
   Widget build(BuildContext context) {
-    if (_isAdmin == null)
+    if (_isAdmin == null) {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
-    if (_isAdmin != true)
+    }
+    if (_isAdmin != true) {
       return Scaffold(
         appBar: AppBar(title: const Text('Admin review')),
         body: Center(child: Text(_error ?? 'Admin custom claim required.')),
       );
+    }
     return Scaffold(
       appBar: AppBar(
         title: const Text('Admin review'),
@@ -185,18 +193,21 @@ class _AdminReviewPageState extends State<AdminReviewPage> {
                       .orderBy('sortOrder')
                       .snapshots(),
                   builder: (context, snapshot) {
-                    if (snapshot.hasError)
+                    if (snapshot.hasError) {
                       return const ListTile(
                         title: Text('Could not load the vehicle catalog.'),
                       );
-                    if (!snapshot.hasData)
+                    }
+                    if (!snapshot.hasData) {
                       return const LinearProgressIndicator();
-                    if (snapshot.data!.docs.isEmpty)
+                    }
+                    if (snapshot.data!.docs.isEmpty) {
                       return const ListTile(
                         title: Text(
                           'Catalog is empty. Use Initialize catalog first.',
                         ),
                       );
+                    }
                     return Column(
                       children: snapshot.data!.docs.map((doc) {
                         final data = doc.data();
@@ -221,18 +232,21 @@ class _AdminReviewPageState extends State<AdminReviewPage> {
                       .where('status', isEqualTo: 'PENDING_REVIEW')
                       .snapshots(),
                   builder: (context, snapshot) {
-                    if (snapshot.hasError)
+                    if (snapshot.hasError) {
                       return const ListTile(
                         title: Text(
                           'Could not load KYC queue. Check admin Firestore rules.',
                         ),
                       );
-                    if (!snapshot.hasData)
+                    }
+                    if (!snapshot.hasData) {
                       return const LinearProgressIndicator();
-                    if (snapshot.data!.docs.isEmpty)
+                    }
+                    if (snapshot.data!.docs.isEmpty) {
                       return const ListTile(
                         title: Text('No KYC reviews pending.'),
                       );
+                    }
                     return Column(
                       children: snapshot.data!.docs
                           .map(
@@ -258,7 +272,7 @@ class _AdminReviewPageState extends State<AdminReviewPage> {
                                           doc.data()[key] as String,
                                           height: 180,
                                           fit: BoxFit.contain,
-                                          errorBuilder: (_, __, ___) =>
+                                          errorBuilder: (_, _, _) =>
                                               const Text(
                                                 'Document preview unavailable. Check storage access.',
                                               ),
@@ -305,18 +319,21 @@ class _AdminReviewPageState extends State<AdminReviewPage> {
                       .where('status', isEqualTo: 'PENDING_REVIEW')
                       .snapshots(),
                   builder: (context, snapshot) {
-                    if (snapshot.hasError)
+                    if (snapshot.hasError) {
                       return const ListTile(
                         title: Text(
                           'Could not load payout queue. Check admin Firestore rules.',
                         ),
                       );
-                    if (!snapshot.hasData)
+                    }
+                    if (!snapshot.hasData) {
                       return const LinearProgressIndicator();
-                    if (snapshot.data!.docs.isEmpty)
+                    }
+                    if (snapshot.data!.docs.isEmpty) {
                       return const ListTile(
                         title: Text('No payouts pending review.'),
                       );
+                    }
                     return Column(
                       children: snapshot.data!.docs.map((doc) {
                         final data = doc.data();
@@ -373,16 +390,19 @@ class _AdminReviewPageState extends State<AdminReviewPage> {
                       .where('status', isEqualTo: 'OPEN')
                       .snapshots(),
                   builder: (context, snapshot) {
-                    if (snapshot.hasError)
+                    if (snapshot.hasError) {
                       return const ListTile(
                         title: Text('Could not load safety alerts.'),
                       );
-                    if (!snapshot.hasData)
+                    }
+                    if (!snapshot.hasData) {
                       return const LinearProgressIndicator();
-                    if (snapshot.data!.docs.isEmpty)
+                    }
+                    if (snapshot.data!.docs.isEmpty) {
                       return const ListTile(
                         title: Text('No open safety alerts.'),
                       );
+                    }
                     return Column(
                       children: snapshot.data!.docs.map((doc) {
                         final data = doc.data();
@@ -417,16 +437,19 @@ class _AdminReviewPageState extends State<AdminReviewPage> {
                       .where('status', isEqualTo: 'PENDING_REVIEW')
                       .snapshots(),
                   builder: (context, snapshot) {
-                    if (snapshot.hasError)
+                    if (snapshot.hasError) {
                       return const ListTile(
                         title: Text('Could not load customer reports.'),
                       );
-                    if (!snapshot.hasData)
+                    }
+                    if (!snapshot.hasData) {
                       return const LinearProgressIndicator();
-                    if (snapshot.data!.docs.isEmpty)
+                    }
+                    if (snapshot.data!.docs.isEmpty) {
                       return const ListTile(
                         title: Text('No customer reports pending.'),
                       );
+                    }
                     return Column(
                       children: snapshot.data!.docs.map((doc) {
                         final data = doc.data();
@@ -484,16 +507,19 @@ class _AdminReviewPageState extends State<AdminReviewPage> {
                       .where('status', isEqualTo: 'PENDING_REVIEW')
                       .snapshots(),
                   builder: (context, snapshot) {
-                    if (snapshot.hasError)
+                    if (snapshot.hasError) {
                       return const ListTile(
                         title: Text('Could not load refund requests.'),
                       );
-                    if (!snapshot.hasData)
+                    }
+                    if (!snapshot.hasData) {
                       return const LinearProgressIndicator();
-                    if (snapshot.data!.docs.isEmpty)
+                    }
+                    if (snapshot.data!.docs.isEmpty) {
                       return const ListTile(
                         title: Text('No refund requests pending.'),
                       );
+                    }
                     return Column(
                       children: snapshot.data!.docs.map((doc) {
                         final data = doc.data();

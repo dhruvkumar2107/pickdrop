@@ -747,7 +747,7 @@ class _PlaceSearchSheetState extends State<_PlaceSearchSheet> {
                 )
               : ListView.separated(
                   itemCount: _predictions.length,
-                  separatorBuilder: (_, __) => const Divider(height: 1),
+                  separatorBuilder: (_, _) => const Divider(height: 1),
                   itemBuilder: (context, index) {
                     final prediction = _predictions[index];
                     return ListTile(
