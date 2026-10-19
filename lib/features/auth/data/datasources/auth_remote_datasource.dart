@@ -1,8 +1,10 @@
 import 'dart:async';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
+import '../../../../config/env/env_config.dart';
 import '../models/user_model.dart';
 
 abstract class AuthRemoteDataSource {
@@ -202,10 +204,12 @@ class AuthRemoteDataSourceImpl implements AuthRemoteDataSource {
   @override
   Future<void> deleteAccount() async {
     final user = auth.currentUser;
-    if (user != null) {
-      await firestore.collection('users').doc(user.uid).delete();
-      await user.delete();
-    }
+    if (user == null) return;
+    final callable = FirebaseFunctions.instanceFor(
+      region: EnvConfig.functionsRegion,
+    ).httpsCallable('deleteAccount');
+    await callable.call<void>();
+    await auth.signOut();
   }
 
   @override
