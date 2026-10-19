@@ -8,10 +8,14 @@ export {
   rejectOffer,
   verifyPickupOtp,
   verifyDropOtp,
+  verifyIntermediateStopOtp,
   cancelBooking,
 } from './booking';
 
-export { verifyPayment, createRazorpayOrder } from './payment';
+export { verifyPayment, createRazorpayOrder, createWalletTopupOrder, verifyWalletTopup, razorpayPaymentWebhook } from './payment';
+export { deleteAccount } from './account';
+export { submitTripRating } from './ratings';
+export { searchPlaces, getPlaceDetails } from './places';
 export {
   createPriceLock,
   validatePriceLock,
@@ -21,11 +25,24 @@ export {
 
 export {
   reportExtraCash,
+  reviewCustomerReport,
   handleDriverCancellation,
   requestInstantRefund,
   requestPayout,
   dispatchScheduledBookings,
   onBookingUpdated,
   settleDeliveredTrip,
+  reviewDriverKyc,
+  submitDriverKyc,
+  createSosAlert,
+  getReferralCode,
+  resolveSosAlert,
+  createPublicTrackingLink,
+  revokePublicTrackingLink,
+  getPublicTracking,
+  reviewDriverPayout,
+  seedBusinessDefaults,
+  updateVehiclePricing,
+  razorpayXPayoutWebhook,
   remindScheduledBookings,
 } from './trust';

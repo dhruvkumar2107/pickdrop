@@ -89,15 +89,20 @@ export function decodeGeohash(hash: string): Decoded {
  */
 export function geohashNeighbors(hash: string): string[] {
   const { lat, lng, latErr, lngErr } = decodeGeohash(hash);
+  // Move a full cell (2 x half-size) so we land in the centre of the adjacent
+  // cell instead of on the boundary of the current one.
+  const dLat = latErr * 2;
+  const dLng = lngErr * 2;
   const at = (la: number, lo: number) => encodeGeohash(la, lo, hash.length);
-  return [
-    at(lat, lng + lngErr),
-    at(lat, lng - lngErr),
-    at(lat + latErr, lng),
-    at(lat - latErr, lng),
-    at(lat + latErr, lng + lngErr),
-    at(lat + latErr, lng - lngErr),
-    at(lat - latErr, lng + lngErr),
-    at(lat - latErr, lng - lngErr),
+  const candidates = [
+    at(lat, lng + dLng),
+    at(lat, lng - dLng),
+    at(lat + dLat, lng),
+    at(lat - dLat, lng),
+    at(lat + dLat, lng + dLng),
+    at(lat + dLat, lng - dLng),
+    at(lat - dLat, lng + dLng),
+    at(lat - dLat, lng - dLng),
   ];
+  return [...new Set(candidates)].filter((neighbor) => neighbor !== hash);
 }

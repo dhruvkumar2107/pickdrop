@@ -5,7 +5,8 @@ class EnvConfig {
   static const String _firebaseAuthDomain = 'FIREBASE_AUTH_DOMAIN';
   static const String _firebaseProjectId = 'FIREBASE_PROJECT_ID';
   static const String _firebaseStorageBucket = 'FIREBASE_STORAGE_BUCKET';
-  static const String _firebaseMessagingSenderId = 'FIREBASE_MESSAGING_SENDER_ID';
+  static const String _firebaseMessagingSenderId =
+      'FIREBASE_MESSAGING_SENDER_ID';
   static const String _firebaseAppId = 'FIREBASE_APP_ID';
   static const String _googleMapsApiKey = 'GOOGLE_MAPS_API_KEY';
   static const String _razorpayKeyId = 'RAZORPAY_KEY_ID';
@@ -14,12 +15,15 @@ class EnvConfig {
   static String get firebaseApiKey => dotenv.env[_firebaseApiKey] ?? '';
   static String get firebaseAuthDomain => dotenv.env[_firebaseAuthDomain] ?? '';
   static String get firebaseProjectId => dotenv.env[_firebaseProjectId] ?? '';
-  static String get firebaseStorageBucket => dotenv.env[_firebaseStorageBucket] ?? '';
-  static String get firebaseMessagingSenderId => dotenv.env[_firebaseMessagingSenderId] ?? '';
+  static String get firebaseStorageBucket =>
+      dotenv.env[_firebaseStorageBucket] ?? '';
+  static String get firebaseMessagingSenderId =>
+      dotenv.env[_firebaseMessagingSenderId] ?? '';
   static String get firebaseAppId => dotenv.env[_firebaseAppId] ?? '';
   static String get googleMapsApiKey => dotenv.env[_googleMapsApiKey] ?? '';
   static String get razorpayKeyId => dotenv.env[_razorpayKeyId] ?? '';
-  static String get functionsRegion => dotenv.env[_functionsRegion] ?? 'us-central1';
+  static String get functionsRegion =>
+      dotenv.env[_functionsRegion] ?? 'us-central1';
 
   /// Public (unauthenticated) web tracking page base URL, no trailing slash.
   static String get trackingBaseUrl {
@@ -38,12 +42,20 @@ class EnvConfig {
 
   static bool get isGoogleMapsConfigured => googleMapsApiKey.isNotEmpty;
 
-  /// `PHONE_AUTH_MODE`: `any` (default) accepts any 10-digit number and any
-  /// OTP without an SMS round-trip; `firebase` uses real phone verification.
+  /// Production always uses Firebase Phone Auth. Local demo auth is not
+  /// currently implemented and must not silently bypass verification.
   static String get phoneAuthMode =>
-      (dotenv.env['PHONE_AUTH_MODE'] ?? 'any').trim().toLowerCase();
+      (dotenv.env['PHONE_AUTH_MODE'] ?? 'firebase').trim().toLowerCase();
 
-  static bool get acceptAnyOtp => phoneAuthMode != 'firebase';
+  static bool get isExplicitLocalDemoMode => phoneAuthMode == 'local-demo';
+
+  static bool get useFirebaseEmulators =>
+      (dotenv.env['USE_FIREBASE_EMULATORS'] ?? 'false').toLowerCase() == 'true';
+
+  /// Host the Firebase Emulator Suite runs on. Android emulators must use
+  /// `10.0.2.2` to reach the developer machine.
+  static String get emulatorHost =>
+      (dotenv.env['EMULATOR_HOST'] ?? 'localhost').trim();
 
   static bool get isRazorpayConfigured => razorpayKeyId.isNotEmpty;
 }

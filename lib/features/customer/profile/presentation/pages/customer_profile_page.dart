@@ -1,10 +1,12 @@
-﻿import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../../../../config/env/env_config.dart';
 import '../../../../../../config/router/route_names.dart';
 import '../../../../../../core/constants/app_constants.dart';
 import '../../../../../../core/constants/colors.dart';
@@ -19,7 +21,8 @@ class CustomerProfilePage extends ConsumerStatefulWidget {
   const CustomerProfilePage({super.key});
 
   @override
-  ConsumerState<CustomerProfilePage> createState() => _CustomerProfilePageState();
+  ConsumerState<CustomerProfilePage> createState() =>
+      _CustomerProfilePageState();
 }
 
 class _CustomerProfilePageState extends ConsumerState<CustomerProfilePage> {
@@ -59,8 +62,8 @@ class _CustomerProfilePageState extends ConsumerState<CustomerProfilePage> {
         _name = (data['displayName'] as String?)?.trim().isNotEmpty == true
             ? (data['displayName'] as String).trim()
             : (user.displayName?.trim().isNotEmpty == true
-                ? user.displayName!.trim()
-                : 'PickDrop customer');
+                  ? user.displayName!.trim()
+                  : 'PickDrop customer');
         _phone = (data['phoneNumber'] as String?) ?? user.phoneNumber ?? '';
         _totalTrips = trips.count ?? 0;
         _savedAddresses = addresses.count ?? 0;
@@ -87,7 +90,54 @@ class _CustomerProfilePageState extends ConsumerState<CustomerProfilePage> {
     );
     if (!mounted || confirmed != true) return;
     await FirebaseAuth.instance.signOut();
+    if (!mounted) return;
     context.go(RouteNames.splash);
+  }
+
+  Future<void> _deleteAccount() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Delete account?'),
+        content: const Text(
+          'This permanently removes your profile, saved addresses and login. '
+          'Past bookings and payment records are kept for accounting. '
+          'This cannot be undone.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(context).colorScheme.error,
+            ),
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    try {
+      final callable = FirebaseFunctions.instanceFor(
+        region: EnvConfig.functionsRegion,
+      ).httpsCallable('deleteAccount');
+      await callable.call<void>();
+      await FirebaseAuth.instance.signOut();
+      if (mounted) context.go(RouteNames.splash);
+    } on FirebaseFunctionsException catch (error) {
+      if (!mounted) return;
+      final message = error.message?.trim().isNotEmpty == true
+          ? error.message!.trim()
+          : 'Could not delete your account. Please try again.';
+      _showComingSoon(message);
+    } catch (_) {
+      if (mounted) {
+        _showComingSoon('Could not delete your account. Please try again.');
+      }
+    }
   }
 
   Future<void> _editProfile() async {
@@ -106,7 +156,10 @@ class _CustomerProfilePageState extends ConsumerState<CustomerProfilePage> {
           decoration: const InputDecoration(labelText: 'Name'),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Cancel'),
+          ),
           FilledButton(
             onPressed: () {
               final value = controller.text.trim();
@@ -120,14 +173,16 @@ class _CustomerProfilePageState extends ConsumerState<CustomerProfilePage> {
     controller.dispose();
     if (name == null || !mounted) return;
     try {
-      await FirebaseFirestore.instance.collection('users').doc(user.uid).set(
-        {'displayName': name, 'updatedAt': FieldValue.serverTimestamp()},
-        SetOptions(merge: true),
-      );
+      await FirebaseFirestore.instance.collection('users').doc(user.uid).set({
+        'displayName': name,
+        'updatedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
       await user.updateDisplayName(name);
       if (mounted) setState(() => _name = name);
     } catch (_) {
-      if (mounted) _showComingSoon('Could not update your profile. Please try again.');
+      if (mounted) {
+        _showComingSoon('Could not update your profile. Please try again.');
+      }
     }
   }
 
@@ -295,7 +350,8 @@ class _CustomerProfilePageState extends ConsumerState<CustomerProfilePage> {
                   _SettingsItem(
                     icon: Icons.description_outlined,
                     title: AppStrings.termsConditions,
-                    onTap: () => _showComingSoon('Terms & Conditions coming soon'),
+                    onTap: () =>
+                        _showComingSoon('Terms & Conditions coming soon'),
                   ),
                   _SettingsItem(
                     icon: Icons.privacy_tip_outlined,
@@ -314,10 +370,74 @@ class _CustomerProfilePageState extends ConsumerState<CustomerProfilePage> {
                 AppDimensions.spacingLg,
                 AppDimensions.spacingXxl,
               ),
-              child: _buildLogoutTile(context, colors),
+              child: Column(
+                children: [
+                  _buildDeleteAccountTile(context, colors),
+                  const SizedBox(height: AppDimensions.spacingMd),
+                  _buildLogoutTile(context, colors),
+                ],
+              ),
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildDeleteAccountTile(
+    BuildContext context,
+    AppColorsExtension colors,
+  ) {
+    return Material(
+      color: colors.transparent,
+      child: InkWell(
+        onTap: _deleteAccount,
+        borderRadius: BorderRadius.circular(AppDimensions.radiusLg),
+        child: Container(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(
+            horizontal: AppDimensions.spacingLg,
+            vertical: AppDimensions.spacingMd,
+          ),
+          decoration: BoxDecoration(
+            color: colors.surfaceCard,
+            borderRadius: BorderRadius.circular(AppDimensions.radiusLg),
+            border: Border.all(color: colors.error.withValues(alpha: 0.35)),
+          ),
+          child: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(AppDimensions.spacingSm),
+                decoration: BoxDecoration(
+                  color: colors.error.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(AppDimensions.radiusSm),
+                ),
+                child: Icon(
+                  Icons.delete_forever_outlined,
+                  size: AppDimensions.iconSm,
+                  color: colors.error,
+                ),
+              ),
+              const SizedBox(width: AppDimensions.spacingMd),
+              Expanded(
+                child: Text(
+                  'Delete account',
+                  style: TextStyle(
+                    fontFamily: 'Poppins',
+                    fontSize: 15,
+                    fontWeight: FontWeight.w600,
+                    color: colors.error,
+                  ),
+                ),
+              ),
+              Icon(
+                Icons.chevron_right_rounded,
+                size: AppDimensions.iconMd,
+                color: colors.error.withValues(alpha: 0.7),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -374,11 +494,14 @@ class _CustomerProfilePageState extends ConsumerState<CustomerProfilePage> {
           Stack(
             children: [
               AvatarWidget(
-                name: _name,
-                radius: AppDimensions.avatarXl / 2,
-                backgroundColor: Colors.white.withValues(alpha: 0.22),
-                textColor: Colors.white,
-              ).animate().fadeIn(duration: AppConstants.mediumAnimation).scale(
+                    name: _name,
+                    radius: AppDimensions.avatarXl / 2,
+                    backgroundColor: Colors.white.withValues(alpha: 0.22),
+                    textColor: Colors.white,
+                  )
+                  .animate()
+                  .fadeIn(duration: AppConstants.mediumAnimation)
+                  .scale(
                     begin: const Offset(0.9, 0.9),
                     end: const Offset(1.0, 1.0),
                     duration: AppConstants.mediumAnimation,
@@ -391,8 +514,12 @@ class _CustomerProfilePageState extends ConsumerState<CustomerProfilePage> {
                   padding: const EdgeInsets.all(AppDimensions.spacingXs),
                   decoration: BoxDecoration(
                     color: Colors.white,
-                    borderRadius: BorderRadius.circular(AppDimensions.radiusFull),
-                    border: Border.all(color: colors.primary.withValues(alpha: 0.4)),
+                    borderRadius: BorderRadius.circular(
+                      AppDimensions.radiusFull,
+                    ),
+                    border: Border.all(
+                      color: colors.primary.withValues(alpha: 0.4),
+                    ),
                   ),
                   child: Icon(
                     Icons.edit_rounded,
@@ -498,7 +625,9 @@ class _CustomerProfilePageState extends ConsumerState<CustomerProfilePage> {
         ),
         const SizedBox(height: AppDimensions.spacingSm),
         Container(
-          padding: const EdgeInsets.symmetric(vertical: AppDimensions.spacingXs),
+          padding: const EdgeInsets.symmetric(
+            vertical: AppDimensions.spacingXs,
+          ),
           decoration: BoxDecoration(
             color: colors.surfaceCard,
             borderRadius: BorderRadius.circular(AppDimensions.radiusLg),
@@ -519,10 +648,7 @@ class _CustomerProfilePageState extends ConsumerState<CustomerProfilePage> {
                     padding: const EdgeInsets.only(
                       left: AppDimensions.spacingXxl + AppDimensions.spacingMd,
                     ),
-                    child: Container(
-                      height: 1,
-                      color: colors.outlineVariant,
-                    ),
+                    child: Container(height: 1, color: colors.outlineVariant),
                   ),
                 _SettingsItemWidget(item: items[i], colors: colors),
               ],
@@ -604,10 +730,7 @@ class _SettingsItem {
 }
 
 class _SettingsItemWidget extends StatelessWidget {
-  const _SettingsItemWidget({
-    required this.item,
-    required this.colors,
-  });
+  const _SettingsItemWidget({required this.item, required this.colors});
 
   final _SettingsItem item;
   final AppColorsExtension colors;

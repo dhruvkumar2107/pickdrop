@@ -4,7 +4,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
+import 'config/env/env_config.dart';
 import 'config/firebase/firebase_options.dart';
 import 'config/router/app_router.dart';
 import 'core/constants/colors.dart';
@@ -23,6 +27,14 @@ void main() async {
     await Firebase.initializeApp(
       options: DefaultFirebaseOptions.currentPlatform,
     );
+    if (EnvConfig.useFirebaseEmulators) {
+      final host = EnvConfig.emulatorHost;
+      await FirebaseAuth.instance.useAuthEmulator(host, 9099);
+      FirebaseFirestore.instance.useFirestoreEmulator(host, 8080);
+      FirebaseFunctions.instanceFor(
+        region: EnvConfig.functionsRegion,
+      ).useFunctionsEmulator(host, 5001);
+    }
     await NotificationService().initialize();
   } catch (error) {
     bootstrapError = error;

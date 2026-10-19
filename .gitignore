@@ -49,6 +49,7 @@ app.*.map.json
 
 # Secrets & Firebase local config
 .env
+.env.client
 google-services.json
 GoogleService-Info.plist
 *.jks
@@ -60,3 +61,6 @@ functions/lib/
 firebase-debug.log
 firestore-debug.log
 ui-debug.log
+
+# Compiled Cloud Functions test output
+functions/.test-build
