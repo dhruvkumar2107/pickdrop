@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -20,6 +22,10 @@ class _DriverTripHistoryPageState extends State<DriverTripHistoryPage> {
   static const List<String> _filters = ['All', 'Today', 'This Week'];
   int _selectedFilter = 0;
 
+  StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _bookingSub;
+  StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _ledgerSub;
+
+  Map<String, Map<String, dynamic>> _ledgerMap = {};
   List<_HistoryTrip> _trips = [];
   double _ledgerEarnings = 0;
   bool _loading = true;
@@ -27,50 +33,72 @@ class _DriverTripHistoryPageState extends State<DriverTripHistoryPage> {
   @override
   void initState() {
     super.initState();
-    _loadTrips();
+    _listenTrips();
   }
 
-  Future<void> _loadTrips() async {
+  @override
+  void dispose() {
+    _bookingSub?.cancel();
+    _ledgerSub?.cancel();
+    super.dispose();
+  }
+
+  void _listenTrips() {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) {
       setState(() => _loading = false);
       return;
     }
-    try {
-      final db = FirebaseFirestore.instance;
-      final results = await Future.wait([
-        db.collection('bookings').where('driverId', isEqualTo: uid).get(),
-        db.collection('driverLedger').where('driverId', isEqualTo: uid).get(),
-      ]);
-      final ledger = {for (final d in results[1].docs) d.id: d.data()};
-      final trips = results[0].docs.map((doc) {
-        final data = doc.data();
-        final route = ledger[doc.id];
-        final created = data['createdAt'];
-        return _HistoryTrip(
-          id: doc.id,
-          customer:
-              'Delivery ${doc.id.substring(0, doc.id.length > 8 ? 8 : doc.id.length)}',
-          pickup: (data['pickup']?['address'] ?? 'Pickup').toString(),
-          drop: (data['drop']?['address'] ?? 'Destination').toString(),
-          fare: (data['fareBreakdown']?['total'] as num? ?? 0).toDouble(),
-          commission: (route?['commission'] as num? ?? 0).toDouble(),
-          dateTime: created is Timestamp ? created.toDate() : DateTime.now(),
-          status: (data['status'] ?? 'UNKNOWN').toString(),
-        );
-      }).toList()..sort((a, b) => b.dateTime.compareTo(a.dateTime));
+    final db = FirebaseFirestore.instance;
+    _bookingSub = db
+        .collection('bookings')
+        .where('driverId', isEqualTo: uid)
+        .snapshots()
+        .listen((bookingSnap) {
       if (!mounted) return;
+      _rebuildTrips(bookingSnap);
+    }, onError: (_) {
+      if (mounted) setState(() => _loading = false);
+    });
+    _ledgerSub = db
+        .collection('driverLedger')
+        .where('driverId', isEqualTo: uid)
+        .snapshots()
+        .listen((ledgerSnap) {
+      if (!mounted) return;
+      final map = {for (final d in ledgerSnap.docs) d.id: d.data()};
       setState(() {
-        _trips = trips;
-        _ledgerEarnings = results[1].docs.fold<double>(
+        _ledgerMap = map;
+        _ledgerEarnings = ledgerSnap.docs.fold<double>(
           0,
           (running, d) => running + ((d.data()['net'] as num?)?.toDouble() ?? 0),
         );
-        _loading = false;
       });
-    } catch (_) {
-      if (mounted) setState(() => _loading = false);
-    }
+    });
+  }
+
+  void _rebuildTrips(QuerySnapshot<Map<String, dynamic>> bookingSnap) {
+    final trips = bookingSnap.docs.map((doc) {
+      final data = doc.data();
+      final route = _ledgerMap[doc.id];
+      final created = data['createdAt'];
+      return _HistoryTrip(
+        id: doc.id,
+        customer:
+            'Delivery ${doc.id.substring(0, doc.id.length > 8 ? 8 : doc.id.length)}',
+        pickup: (data['pickup']?['address'] ?? 'Pickup').toString(),
+        drop: (data['drop']?['address'] ?? 'Destination').toString(),
+        fare: (data['fareBreakdown']?['total'] as num? ?? 0).toDouble(),
+        commission: (route?['commission'] as num? ?? 0).toDouble(),
+        dateTime: created is Timestamp ? created.toDate() : DateTime.now(),
+        status: (data['status'] ?? 'UNKNOWN').toString(),
+      );
+    }).toList()..sort((a, b) => b.dateTime.compareTo(a.dateTime));
+    if (!mounted) return;
+    setState(() {
+      _trips = trips;
+      _loading = false;
+    });
   }
 
   String _formatDate(DateTime date) {
@@ -91,6 +119,16 @@ class _DriverTripHistoryPageState extends State<DriverTripHistoryPage> {
         elevation: 0,
         title: Text('Trip History', style: AppTextStyles.headlineSmall),
         iconTheme: const IconThemeData(color: AppColors.onSurface),
+        actions: [
+          if (!_loading)
+            IconButton(
+              tooltip: 'Refresh',
+              icon: const Icon(Icons.refresh_rounded),
+              onPressed: () {
+                _listenTrips();
+              },
+            ),
+        ],
       ),
       body: Column(
         children: [
@@ -230,7 +268,7 @@ class _DriverTripHistoryPageState extends State<DriverTripHistoryPage> {
                                 ),
                                 const SizedBox(height: AppDimensions.spacingXs),
                                 Text(
-                                  '${t.pickup}  →  ${t.drop}',
+                                  '${t.pickup}  \u2192  ${t.drop}',
                                   style: AppTextStyles.bodySmall.copyWith(
                                     color: AppColors.onSurfaceVariant,
                                   ),
