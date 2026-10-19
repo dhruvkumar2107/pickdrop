@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:go_router/go_router.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
 import '../../../../../../config/router/route_names.dart';
-import '../../../../../../core/constants/app_constants.dart';
 import '../../../../../../core/constants/colors.dart';
 import '../../../../../../core/constants/dimensions.dart';
 import '../../../../../../core/constants/strings.dart';
@@ -28,35 +29,153 @@ class DriverProfilePage extends StatefulWidget {
 }
 
 class _DriverProfilePageState extends State<DriverProfilePage> {
-  static const String _name = 'Rohan Verma';
-  static const String _phone = '+91 98765 43210';
-  static const String _vehicleName = 'Tata Intra • Pickup';
-  static const String _vehicleNumber = 'MH12 AB 4521';
-  static const int _totalTrips = 1248;
-  static const double _rating = 4.9;
-  static const double _acceptance = 94;
-  static const int _years = 4;
+  bool _loading = true;
 
-  static const List<_DocumentItem> _documents = [
-    _DocumentItem(
-      icon: Icons.badge_outlined,
-      title: 'Driving Licence',
-      subtitle: 'MH12 2019 0034567 • Valid till 2032',
-      status: AppConstants.verificationApproved,
-    ),
-    _DocumentItem(
-      icon: Icons.description_outlined,
-      title: 'Vehicle RC',
-      subtitle: 'MH12AB4521 • Valid till 2030',
-      status: AppConstants.verificationApproved,
-    ),
-    _DocumentItem(
-      icon: Icons.credit_card_outlined,
-      title: 'Aadhaar',
-      subtitle: 'XXXX XXXX 4821 • KYC linked',
-      status: AppConstants.verificationPending,
-    ),
-  ];
+  String _name = 'Driver';
+  String _phone = '';
+
+  String _vehicleTypeId = '';
+  String _vehicleNumber = '';
+  String _vehicleModel = '';
+  String _verificationStatus = '';
+
+  double _rating = 0;
+  int _totalTrips = 0;
+  double _totalEarnings = 0;
+
+  String? _licenseNumber;
+  String? _rcNumber;
+  DateTime? _licenseExpiry;
+  DateTime? _rcExpiry;
+  bool _hasKyc = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) {
+      if (mounted) setState(() => _loading = false);
+      return;
+    }
+    try {
+      final results = await Future.wait([
+        FirebaseFirestore.instance.collection('users').doc(uid).get(),
+        FirebaseFirestore.instance.collection('drivers').doc(uid).get(),
+        FirebaseFirestore.instance.collection('driverPrivate').doc(uid).get(),
+      ]);
+      final user = results[0].data() ?? const {};
+      final driver = results[1].data() ?? const {};
+      final kyc = results[2].data() ?? const {};
+
+      DateTime? expiry(dynamic value) =>
+          value is Timestamp ? value.toDate().toLocal() : null;
+
+      if (!mounted) return;
+      setState(() {
+        _name = ((user['displayName'] as String?) ?? '').trim().isEmpty
+            ? 'Driver'
+            : (user['displayName'] as String).trim();
+        _phone = (user['phoneNumber'] as String?) ?? '';
+        _vehicleTypeId = (driver['vehicleTypeId'] as String?) ?? '';
+        _vehicleNumber = (driver['vehicleNumber'] as String?) ?? '';
+        _vehicleModel = (driver['vehicleModel'] as String?) ?? '';
+        _verificationStatus = (driver['verificationStatus'] as String?) ?? '';
+        _totalTrips = (driver['totalTrips'] as num?)?.toInt() ?? 0;
+        _rating = (driver['rating'] as num?)?.toDouble() ?? 0;
+        _totalEarnings = (driver['totalEarnings'] as num?)?.toDouble() ?? 0;
+        _licenseNumber = kyc['licenseNumber'] as String?;
+        _rcNumber = kyc['rcNumber'] as String?;
+        _licenseExpiry = expiry(kyc['licenseExpiry']);
+        _rcExpiry = expiry(kyc['rcExpiry']);
+        _hasKyc = kyc.isNotEmpty;
+        _loading = false;
+      });
+    } catch (_) {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  bool get _verified => _verificationStatus == 'APPROVED';
+
+  String get _verificationLabel {
+    switch (_verificationStatus) {
+      case 'APPROVED':
+        return 'Verified';
+      case 'PENDING_REVIEW':
+        return 'In review';
+      case 'REJECTED':
+        return 'Action needed';
+      default:
+        return 'Not submitted';
+    }
+  }
+
+  String get _vehicleTypeLabel {
+    if (_vehicleTypeId.isEmpty) return 'Delivery partner';
+    return _vehicleTypeId
+        .split('_')
+        .map((word) => word.isEmpty
+            ? word
+            : '${word[0].toUpperCase()}${word.substring(1)}')
+        .join(' ');
+  }
+
+  String _mask(String? value) {
+    final text = (value ?? '').trim();
+    if (text.isEmpty) return 'On file';
+    if (text.length <= 4) return text;
+    return '•••• ${text.substring(text.length - 4)}';
+  }
+
+  Future<void> _editProfile() async {
+    final controller = TextEditingController(text: _name == 'Driver' ? '' : _name);
+    final name = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Edit your name'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          maxLength: 80,
+          textCapitalization: TextCapitalization.words,
+          decoration: const InputDecoration(labelText: 'Name'),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () {
+              final value = controller.text.trim();
+              if (value.isNotEmpty) Navigator.pop(dialogContext, value);
+            },
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (name == null || uid == null || !mounted) return;
+    try {
+      await FirebaseFirestore.instance.collection('users').doc(uid).set({
+        'displayName': name,
+        'updatedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+      final user = FirebaseAuth.instance.currentUser;
+      if (user != null) await user.updateDisplayName(name);
+      if (mounted) setState(() => _name = name);
+    } catch (_) {
+      if (mounted) {
+        AppToast.error(context, 'Could not update your profile. Please try again.');
+      }
+    }
+  }
 
   Future<void> _logout() async {
     final confirmed = await AppDialog.showConfirmation(
@@ -67,7 +186,18 @@ class _DriverProfilePageState extends State<DriverProfilePage> {
       isDestructive: true,
     );
     if (!mounted || confirmed != true) return;
-    context.go(RouteNames.splash);
+    try {
+      await FirebaseAuth.instance.signOut();
+    } catch (_) {}
+    if (mounted) context.go(RouteNames.splash);
+  }
+
+  void _openDocuments() {
+    if (_verified) {
+      AppToast.info(context, 'Your documents are verified.');
+      return;
+    }
+    context.push(RouteNames.driverOnboarding);
   }
 
   void _showComingSoon(String feature) {
@@ -81,170 +211,180 @@ class _DriverProfilePageState extends State<DriverProfilePage> {
 
     return Scaffold(
       backgroundColor: colors.surface,
-      body: CustomScrollView(
-        slivers: [
-          SliverToBoxAdapter(child: _buildHeader(context, colors)),
-          SliverToBoxAdapter(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(
-                AppDimensions.spacingLg,
-                AppDimensions.spacingLg,
-                AppDimensions.spacingLg,
-                0,
-              ),
-              child: _buildStats(colors),
+      body: _loading
+          ? const Center(child: CircularProgressIndicator())
+          : CustomScrollView(
+              slivers: [
+                SliverToBoxAdapter(child: _buildHeader(context, colors)),
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(
+                      AppDimensions.spacingLg,
+                      AppDimensions.spacingLg,
+                      AppDimensions.spacingLg,
+                      0,
+                    ),
+                    child: _buildStats(colors),
+                  ),
+                ),
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(
+                      AppDimensions.spacingLg,
+                      AppDimensions.spacingXl,
+                      AppDimensions.spacingLg,
+                      0,
+                    ),
+                    child: _buildDocumentsSection(colors),
+                  ),
+                ),
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(
+                      AppDimensions.spacingLg,
+                      AppDimensions.spacingXl,
+                      AppDimensions.spacingLg,
+                      0,
+                    ),
+                    child: _buildSection(
+                      colors: colors,
+                      title: 'Account',
+                      items: [
+                        _MenuRowData(
+                          icon: Icons.account_balance_wallet_outlined,
+                          title: AppStrings.earnings,
+                          onTap: () {
+                            if (!mounted) return;
+                            context.go(RouteNames.driverEarnings);
+                          },
+                        ),
+                        _MenuRowData(
+                          icon: Icons.history_outlined,
+                          title: AppStrings.tripHistory,
+                          onTap: () {
+                            if (!mounted) return;
+                            context.go(RouteNames.driverTripHistory);
+                          },
+                        ),
+                        _MenuRowData(
+                          icon: Icons.local_shipping_outlined,
+                          title: 'Vehicle & documents',
+                          onTap: _openDocuments,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(
+                      AppDimensions.spacingLg,
+                      AppDimensions.spacingXl,
+                      AppDimensions.spacingLg,
+                      0,
+                    ),
+                    child: _buildSection(
+                      colors: colors,
+                      title: 'Preferences',
+                      items: [
+                        _MenuRowData(
+                          icon: Icons.notifications_outlined,
+                          title: 'Notifications',
+                          onTap: () => _showComingSoon('Notification settings'),
+                        ),
+                        _MenuRowData(
+                          icon: Icons.language_rounded,
+                          title: 'Language',
+                          onTap: () {
+                            if (!mounted) return;
+                            context.go(RouteNames.language);
+                          },
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(
+                      AppDimensions.spacingLg,
+                      AppDimensions.spacingXl,
+                      AppDimensions.spacingLg,
+                      0,
+                    ),
+                    child: _buildSection(
+                      colors: colors,
+                      title: AppStrings.helpSupport,
+                      items: [
+                        _MenuRowData(
+                          icon: Icons.support_agent_rounded,
+                          title: AppStrings.helpSupport,
+                          onTap: () => _showComingSoon(AppStrings.helpSupport),
+                        ),
+                        _MenuRowData(
+                          icon: Icons.help_outline_rounded,
+                          title: AppStrings.faqs,
+                          onTap: () => _showComingSoon(AppStrings.faqs),
+                        ),
+                        _MenuRowData(
+                          icon: Icons.mail_outline_rounded,
+                          title: AppStrings.contactUs,
+                          onTap: () => _showComingSoon(AppStrings.contactUs),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(
+                      AppDimensions.spacingLg,
+                      AppDimensions.spacingXl,
+                      AppDimensions.spacingLg,
+                      0,
+                    ),
+                    child: _buildSection(
+                      colors: colors,
+                      title: 'Legal',
+                      items: [
+                        _MenuRowData(
+                          icon: Icons.description_outlined,
+                          title: AppStrings.termsConditions,
+                          onTap: () =>
+                              _showComingSoon(AppStrings.termsConditions),
+                        ),
+                        _MenuRowData(
+                          icon: Icons.privacy_tip_outlined,
+                          title: AppStrings.privacyPolicy,
+                          onTap: () => _showComingSoon(AppStrings.privacyPolicy),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(
+                      AppDimensions.spacingLg,
+                      AppDimensions.spacingXl,
+                      AppDimensions.spacingLg,
+                      AppDimensions.spacingXxl,
+                    ),
+                    child: _buildLogoutTile(colors),
+                  ),
+                ),
+              ],
             ),
-          ),
-          SliverToBoxAdapter(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(
-                AppDimensions.spacingLg,
-                AppDimensions.spacingXl,
-                AppDimensions.spacingLg,
-                0,
-              ),
-              child: _buildDocumentsSection(colors),
-            ),
-          ),
-          SliverToBoxAdapter(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(
-                AppDimensions.spacingLg,
-                AppDimensions.spacingXl,
-                AppDimensions.spacingLg,
-                0,
-              ),
-              child: _buildSection(
-                colors: colors,
-                title: 'Account',
-                items: [
-                  _MenuRowData(
-                    icon: Icons.account_balance_wallet_outlined,
-                    title: AppStrings.earnings,
-                    onTap: () {
-                      if (!mounted) return;
-                      context.go(RouteNames.driverEarnings);
-                    },
-                  ),
-                  _MenuRowData(
-                    icon: Icons.history_outlined,
-                    title: AppStrings.tripHistory,
-                    onTap: () {
-                      if (!mounted) return;
-                      context.go(RouteNames.driverTripHistory);
-                    },
-                  ),
-                  _MenuRowData(
-                    icon: Icons.local_shipping_outlined,
-                    title: 'Vehicle & documents',
-                    onTap: () => _showComingSoon('Vehicle management'),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          SliverToBoxAdapter(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(
-                AppDimensions.spacingLg,
-                AppDimensions.spacingXl,
-                AppDimensions.spacingLg,
-                0,
-              ),
-              child: _buildSection(
-                colors: colors,
-                title: 'Preferences',
-                items: [
-                  _MenuRowData(
-                    icon: Icons.notifications_outlined,
-                    title: 'Notifications',
-                    onTap: () => _showComingSoon('Notification settings'),
-                  ),
-                  _MenuRowData(
-                    icon: Icons.language_rounded,
-                    title: 'Language',
-                    onTap: () => _showComingSoon('Language picker'),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          SliverToBoxAdapter(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(
-                AppDimensions.spacingLg,
-                AppDimensions.spacingXl,
-                AppDimensions.spacingLg,
-                0,
-              ),
-              child: _buildSection(
-                colors: colors,
-                title: AppStrings.helpSupport,
-                items: [
-                  _MenuRowData(
-                    icon: Icons.support_agent_rounded,
-                    title: AppStrings.helpSupport,
-                    onTap: () => _showComingSoon(AppStrings.helpSupport),
-                  ),
-                  _MenuRowData(
-                    icon: Icons.help_outline_rounded,
-                    title: AppStrings.faqs,
-                    onTap: () => _showComingSoon(AppStrings.faqs),
-                  ),
-                  _MenuRowData(
-                    icon: Icons.mail_outline_rounded,
-                    title: AppStrings.contactUs,
-                    onTap: () => _showComingSoon(AppStrings.contactUs),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          SliverToBoxAdapter(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(
-                AppDimensions.spacingLg,
-                AppDimensions.spacingXl,
-                AppDimensions.spacingLg,
-                0,
-              ),
-              child: _buildSection(
-                colors: colors,
-                title: 'Legal',
-                items: [
-                  _MenuRowData(
-                    icon: Icons.description_outlined,
-                    title: AppStrings.termsConditions,
-                    onTap: () => _showComingSoon(AppStrings.termsConditions),
-                  ),
-                  _MenuRowData(
-                    icon: Icons.privacy_tip_outlined,
-                    title: AppStrings.privacyPolicy,
-                    onTap: () => _showComingSoon(AppStrings.privacyPolicy),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          SliverToBoxAdapter(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(
-                AppDimensions.spacingLg,
-                AppDimensions.spacingXl,
-                AppDimensions.spacingLg,
-                AppDimensions.spacingXxl,
-              ),
-              child: _buildLogoutTile(colors),
-            ),
-          ),
-        ],
-      ),
     );
   }
 
   Widget _buildHeader(BuildContext context, AppColorsExtension colors) {
     final accent = colors.driverAccent;
     final onAccent = _onAccent(accent);
+    final vehicleLine = [
+      _vehicleTypeLabel,
+      if (_vehicleNumber.isNotEmpty) _vehicleNumber,
+    ].join(' • ');
 
     return Container(
       width: double.infinity,
@@ -294,7 +434,7 @@ class _DriverProfilePageState extends State<DriverProfilePage> {
                 text: AppStrings.edit,
                 textColor: onAccent,
                 fontWeight: FontWeight.w600,
-                onPressed: () => _showComingSoon('Edit profile'),
+                onPressed: _editProfile,
               ),
             ],
           ),
@@ -310,32 +450,33 @@ class _DriverProfilePageState extends State<DriverProfilePage> {
                 textColor: onAccent,
               )
                   .animate()
-                  .fadeIn(duration: AppConstants.mediumAnimation)
+                  .fadeIn(duration: const Duration(milliseconds: 250))
                   .scale(
                     begin: const Offset(0.9, 0.9),
                     end: const Offset(1.0, 1.0),
-                    duration: AppConstants.mediumAnimation,
+                    duration: const Duration(milliseconds: 250),
                     curve: Curves.easeOutBack,
                   ),
-              Positioned(
-                right: 0,
-                bottom: 0,
-                child: Container(
-                  padding: const EdgeInsets.all(AppDimensions.spacingXxs),
-                  decoration: BoxDecoration(
-                    color: colors.surfaceCard,
-                    shape: BoxShape.circle,
-                    border: Border.all(
-                      color: onAccent.withValues(alpha: 0.4),
+              if (_verified)
+                Positioned(
+                  right: 0,
+                  bottom: 0,
+                  child: Container(
+                    padding: const EdgeInsets.all(AppDimensions.spacingXxs),
+                    decoration: BoxDecoration(
+                      color: colors.surfaceCard,
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: onAccent.withValues(alpha: 0.4),
+                      ),
+                    ),
+                    child: Icon(
+                      Icons.verified_rounded,
+                      size: AppDimensions.iconSm,
+                      color: accent,
                     ),
                   ),
-                  child: Icon(
-                    Icons.verified_rounded,
-                    size: AppDimensions.iconSm,
-                    color: accent,
-                  ),
                 ),
-              ),
             ],
           ),
           const SizedBox(height: AppDimensions.spacingMd),
@@ -349,41 +490,34 @@ class _DriverProfilePageState extends State<DriverProfilePage> {
               color: onAccent,
             ),
           ),
-          const SizedBox(height: AppDimensions.spacingXs),
-          Text(
-            '$_vehicleName • $_vehicleNumber',
-            style: TextStyle(
-              fontFamily: 'Poppins',
-              fontSize: 13,
-              fontWeight: FontWeight.w400,
-              color: onAccent.withValues(alpha: 0.82),
+          if (vehicleLine.isNotEmpty) ...[
+            const SizedBox(height: AppDimensions.spacingXs),
+            Text(
+              vehicleLine,
+              style: TextStyle(
+                fontFamily: 'Poppins',
+                fontSize: 13,
+                fontWeight: FontWeight.w400,
+                color: onAccent.withValues(alpha: 0.82),
+              ),
             ),
-          ),
-          const SizedBox(height: AppDimensions.spacingSm),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              const Icon(
-                Icons.star_rounded,
-                size: AppDimensions.iconSm,
-                color: Color(0xFFFBBF24),
+          ],
+          if (_phone.isNotEmpty) ...[
+            const SizedBox(height: AppDimensions.spacingSm),
+            Text(
+              _phone,
+              style: TextStyle(
+                fontFamily: 'Poppins',
+                fontSize: 13,
+                fontWeight: FontWeight.w500,
+                color: onAccent.withValues(alpha: 0.9),
               ),
-              const SizedBox(width: AppDimensions.spacingXs),
-              Text(
-                '${_rating.toStringAsFixed(1)} • $_phone',
-                style: TextStyle(
-                  fontFamily: 'Poppins',
-                  fontSize: 13,
-                  fontWeight: FontWeight.w500,
-                  color: onAccent.withValues(alpha: 0.9),
-                ),
-              ),
-            ],
-          ),
+            ),
+          ],
           const SizedBox(height: AppDimensions.spacingMd),
           StatusChip.fromStatus(
-            AppConstants.verificationApproved,
-            label: AppStrings.verificationApproved,
+            _verificationStatus.isEmpty ? 'PENDING' : _verificationStatus,
+            label: _verificationLabel,
           ),
         ],
       ),
@@ -419,7 +553,7 @@ class _DriverProfilePageState extends State<DriverProfilePage> {
           Expanded(
             child: _StatItem(
               icon: Icons.star_rounded,
-              value: _rating.toStringAsFixed(1),
+              value: _rating > 0 ? _rating.toStringAsFixed(1) : 'New',
               label: 'Rating',
               colors: colors,
             ),
@@ -427,18 +561,9 @@ class _DriverProfilePageState extends State<DriverProfilePage> {
           _StatDivider(colors: colors),
           Expanded(
             child: _StatItem(
-              icon: Icons.insights_outlined,
-              value: '${_acceptance.toStringAsFixed(0)}%',
-              label: 'Acceptance',
-              colors: colors,
-            ),
-          ),
-          _StatDivider(colors: colors),
-          Expanded(
-            child: _StatItem(
-              icon: Icons.workspace_premium_outlined,
-              value: '$_years',
-              label: 'Years',
+              icon: Icons.currency_rupee_rounded,
+              value: '₹${_totalEarnings.toStringAsFixed(0)}',
+              label: 'Earned',
               colors: colors,
             ),
           ),
@@ -446,8 +571,12 @@ class _DriverProfilePageState extends State<DriverProfilePage> {
       ),
     )
         .animate()
-        .fadeIn(duration: AppConstants.mediumAnimation, delay: 150.ms)
-        .slideY(begin: 0.1, end: 0, duration: AppConstants.mediumAnimation);
+        .fadeIn(duration: const Duration(milliseconds: 250), delay: 150.ms)
+        .slideY(
+          begin: 0.1,
+          end: 0,
+          duration: const Duration(milliseconds: 250),
+        );
   }
 
   Widget _buildDocumentsSection(AppColorsExtension colors) {
@@ -498,7 +627,9 @@ class _DriverProfilePageState extends State<DriverProfilePage> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            _vehicleName,
+                            _vehicleModel.isEmpty
+                                ? _vehicleTypeLabel
+                                : '$_vehicleModel • $_vehicleTypeLabel',
                             style: TextStyle(
                               fontFamily: 'Poppins',
                               fontSize: 15,
@@ -508,7 +639,9 @@ class _DriverProfilePageState extends State<DriverProfilePage> {
                           ),
                           const SizedBox(height: 2),
                           Text(
-                            _vehicleNumber,
+                            _vehicleNumber.isEmpty
+                                ? 'Vehicle not added yet'
+                                : _vehicleNumber,
                             style: TextStyle(
                               fontFamily: 'Poppins',
                               fontSize: 12,
@@ -519,9 +652,11 @@ class _DriverProfilePageState extends State<DriverProfilePage> {
                         ],
                       ),
                     ),
-                    const StatusChip(
-                      label: 'Active',
-                      status: AppChipStatus.success,
+                    StatusChip(
+                      label: _verified ? 'Verified' : 'Pending',
+                      status: _verified
+                          ? AppChipStatus.success
+                          : AppChipStatus.warning,
                       dense: true,
                     ),
                   ],
@@ -533,16 +668,65 @@ class _DriverProfilePageState extends State<DriverProfilePage> {
                 ),
                 child: Container(height: 1, color: colors.outlineVariant),
               ),
-              for (var i = 0; i < _documents.length; i++) ...[
-                if (i > 0)
-                  Padding(
-                    padding: const EdgeInsets.only(
-                      left: AppDimensions.spacingXxl + AppDimensions.spacingMd,
-                    ),
-                    child: Container(height: 1, color: colors.outlineVariant),
+              if (_hasKyc) ...[
+                _DocumentRow(
+                  item: _DocumentItem(
+                    icon: Icons.badge_outlined,
+                    title: 'Driving Licence',
+                    subtitle: _licenseExpiry == null
+                        ? _mask(_licenseNumber)
+                        : '${_mask(_licenseNumber)} • valid till ${_licenseExpiry!.year}',
+                    status: _verified,
                   ),
-                _DocumentRow(item: _documents[i], colors: colors),
-              ],
+                  colors: colors,
+                ),
+                Padding(
+                  padding: const EdgeInsets.only(
+                    left: AppDimensions.spacingXxl + AppDimensions.spacingMd,
+                  ),
+                  child: Container(height: 1, color: colors.outlineVariant),
+                ),
+                _DocumentRow(
+                  item: _DocumentItem(
+                    icon: Icons.description_outlined,
+                    title: 'Vehicle RC',
+                    subtitle: _rcExpiry == null
+                        ? _mask(_rcNumber)
+                        : '${_mask(_rcNumber)} • valid till ${_rcExpiry!.year}',
+                    status: _verified,
+                  ),
+                  colors: colors,
+                ),
+                Padding(
+                  padding: const EdgeInsets.only(
+                    left: AppDimensions.spacingXxl + AppDimensions.spacingMd,
+                  ),
+                  child: Container(height: 1, color: colors.outlineVariant),
+                ),
+                _DocumentRow(
+                  item: _DocumentItem(
+                    icon: Icons.credit_card_outlined,
+                    title: 'Aadhaar',
+                    subtitle: 'Uploaded • on file',
+                    status: _verified,
+                  ),
+                  colors: colors,
+                ),
+              ] else
+                Padding(
+                  padding: const EdgeInsets.all(AppDimensions.spacingMd),
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      'No documents submitted yet. Complete your onboarding to start accepting trips.',
+                      style: TextStyle(
+                        fontFamily: 'Poppins',
+                        fontSize: 12,
+                        color: colors.onSurfaceVariant,
+                      ),
+                    ),
+                  ),
+                ),
             ],
           ),
         ),
@@ -550,10 +734,14 @@ class _DriverProfilePageState extends State<DriverProfilePage> {
     )
         .animate()
         .fadeIn(
-          duration: AppConstants.mediumAnimation,
+          duration: const Duration(milliseconds: 250),
           delay: 250.ms,
         )
-        .slideY(begin: 0.08, end: 0, duration: AppConstants.mediumAnimation);
+        .slideY(
+          begin: 0.08,
+          end: 0,
+          duration: const Duration(milliseconds: 250),
+        );
   }
 
   Widget _buildSection({
@@ -666,7 +854,7 @@ class _DocumentItem {
   final IconData icon;
   final String title;
   final String subtitle;
-  final String status;
+  final bool status;
 }
 
 class _MenuRowData {
@@ -714,7 +902,7 @@ class _DocumentRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isApproved = item.status == AppConstants.verificationApproved;
+    final isApproved = item.status;
     final accent = isApproved ? colors.success : colors.warning;
 
     return Padding(
@@ -762,7 +950,12 @@ class _DocumentRow extends StatelessWidget {
               ],
             ),
           ),
-          StatusChip.fromStatus(item.status, dense: true),
+          StatusChip(
+            label: isApproved ? 'Verified' : 'In review',
+            status:
+                isApproved ? AppChipStatus.success : AppChipStatus.warning,
+            dense: true,
+          ),
         ],
       ),
     );

@@ -60,7 +60,7 @@ class LanguagePage extends ConsumerWidget {
                 ],
                 const SizedBox(height: AppDimensions.spacingLg),
                 Text(
-                  'More languages are coming soon. Hindi and Kannada are in translation.',
+                  'PickDrop is currently available in English only. Hindi and other languages are planned for a future update.',
                   style: AppTextStyles.bodySmall
                       .copyWith(color: AppColors.onSurfaceVariant),
                 ),
