@@ -11,6 +11,8 @@ Verified every reachable client write against `firestore.rules`; fixed writes th
 - `AuthRemoteDataSource.deleteAccount` now calls the `deleteAccount` callable and signs out instead of deleting the `users` doc client-side (denied) then `user.delete()`.
 - Confirmed conforming reachable writes: `users` create/update (allowed key set), `drivers` location/online updates, `safetyContacts` create (exact field set), `reports` SOS create (`reporterId`), profile display-name edit.
 - Latent (unreachable) denied write left in place: `driver_remote_datasource.updateDriverProfile` can write `vehicleTypeId`/`vehicleNumber`/`vehicleModel` (not in the allowed `drivers` update set); the provider is never watched and driver onboarding uses the `submitDriverKyc` callable, so it is dead code.
+- Driver SOS now calls `createSosAlert` (extended to attach the driver's active booking and notify the customer) so it reaches the admin Safety-alerts queue; previously it wrote `reports` type `SOS`, which no admin view displayed.
+- Added a read-only "Refund requests" queue to the admin review page (`reports` type `REFUND_REQUEST`, `PENDING_REVIEW`), since the admin only listed `EXTRA_CASH` and `reports` is append-only. No approval/money movement is implied.
 - Checks: `flutter analyze` 0 errors / 0 warnings, `flutter test` 7/7, `dart analyze` clean on edited files.
 
 ## Follow-up implementation update — 2026-10-19

@@ -476,6 +476,43 @@ class _AdminReviewPageState extends State<AdminReviewPage> {
                     );
                   },
                 ),
+                _sectionTitle('Refund requests'),
+                StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+                  stream: FirebaseFirestore.instance
+                      .collection('reports')
+                      .where('type', isEqualTo: 'REFUND_REQUEST')
+                      .where('status', isEqualTo: 'PENDING_REVIEW')
+                      .snapshots(),
+                  builder: (context, snapshot) {
+                    if (snapshot.hasError)
+                      return const ListTile(
+                        title: Text('Could not load refund requests.'),
+                      );
+                    if (!snapshot.hasData)
+                      return const LinearProgressIndicator();
+                    if (snapshot.data!.docs.isEmpty)
+                      return const ListTile(
+                        title: Text('No refund requests pending.'),
+                      );
+                    return Column(
+                      children: snapshot.data!.docs.map((doc) {
+                        final data = doc.data();
+                        final amount = data['requestedAmount'];
+                        return Card(
+                          child: ListTile(
+                            title: Text(
+                              'Refund request${amount is num ? ' • ₹${amount.toStringAsFixed(2)}' : ''}',
+                            ),
+                            subtitle: Text(
+                              'Booking ${data['bookingId'] ?? 'not attached'} • User ${data['reporterId']}\n${data['reason'] ?? ''}',
+                            ),
+                            isThreeLine: true,
+                          ),
+                        );
+                      }).toList(),
+                    );
+                  },
+                ),
               ],
             ),
           ),
