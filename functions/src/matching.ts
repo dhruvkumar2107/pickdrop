@@ -1,4 +1,5 @@
 import { DocumentReference, Firestore, Timestamp } from 'firebase-admin/firestore';
+import { getMessaging } from 'firebase-admin/messaging';
 import { encodeGeohash, geohashNeighbors } from './geohash';
 import { GeoPoint, haversineKm } from './fare';
 import { AppConfig } from './config';
@@ -45,7 +46,7 @@ export async function findNearbyDrivers(
       for (const doc of snap.docs) {
         if (seen.has(doc.id)) continue;
         const data = doc.data();
-        if (data.isMockLocation === true) continue;
+        if (data.isMockLocation === true || data.activeBookingId) continue;
         const loc = data.currentLocation;
         if (!loc) continue;
         const distanceKm = haversineKm(pickup, {
@@ -135,11 +136,19 @@ export async function runDriverMatching(
 
       const offerId = `${booking.id}_${driver.id}`;
       const offerRef = db.collection('driverOffers').doc(offerId);
+      const bookingData = current.data()!;
       await offerRef.set({
         bookingId: booking.id,
         driverId: driver.id,
         distanceKm: driver.distanceKm,
         pickup: { lat: booking.pickup.lat, lng: booking.pickup.lng },
+        pickupAddress: bookingData.pickup?.address ?? '',
+        dropAddress: bookingData.drop?.address ?? '',
+        goodsType: bookingData.goodsType ?? '',
+        fareBreakdown: bookingData.fareBreakdown ?? {},
+        vehicleTypeId: bookingData.vehicleTypeId ?? '',
+        paymentMethod: bookingData.paymentMethod ?? 'cod',
+        notes: bookingData.notes ?? '',
         status: 'PENDING',
         expiresAt: Timestamp.fromMillis(Date.now() + offerMs),
         createdAt: Timestamp.now(),
@@ -147,7 +156,7 @@ export async function runDriverMatching(
 
       // Nudge the driver (data-only payload; client shows the full-screen
       // request UI with sound/vibration).
-      void notifyDriver(driver);
+      await notifyDriver(driver, booking.id);
 
       const accepted = await waitForOfferDecision(
         offerRef,
@@ -229,19 +238,22 @@ async function assignDriver(
     const driver = driverSnap.data() as
       | {
           isMockLocation?: boolean;
+          activeBookingId?: string;
           currentLocation?: { latitude?: number; longitude?: number };
         }
       | undefined;
 
     const pickup = booking.pickup;
     const loc = driver?.currentLocation;
-    if (driver?.isMockLocation === true || !pickup?.lat || !loc?.latitude) {
+    if (driver?.isMockLocation === true || driver?.activeBookingId || !pickup ||
+        !Number.isFinite(pickup.lat) || !Number.isFinite(pickup.lng) ||
+        !loc || !Number.isFinite(loc.latitude) || !Number.isFinite(loc.longitude)) {
       return false;
     }
 
     const distanceKm = haversineKm(
-      { lat: pickup.lat, lng: pickup.lng ?? 0 },
-      { lat: loc.latitude, lng: loc.longitude ?? 0 },
+      { lat: pickup.lat ?? 0, lng: pickup.lng ?? 0 },
+      { lat: loc.latitude ?? 0, lng: loc.longitude ?? 0 },
     );
     if (distanceKm > 3) return false;
 
@@ -251,13 +263,25 @@ async function assignDriver(
       driverAssignedAt: Timestamp.now(),
       updatedAt: Timestamp.now(),
     });
+    tx.update(driverRef, { activeBookingId: bookingId, updatedAt: Timestamp.now() });
     return true;
   });
 }
 
-async function notifyDriver(driver: CandidateDriver): Promise<void> {
+async function notifyDriver(driver: CandidateDriver, bookingId: string): Promise<void> {
   if (!driver.fcmToken) return;
-  // Wire up firebase-admin messaging here:
-  //   await getMessaging().send({ token: driver.fcmToken, data: { ... } });
-  // Kept as a no-op scaffold so the project builds without FCM configured.
+  try {
+    await getMessaging().send({
+      token: driver.fcmToken,
+      notification: {
+        title: 'New PickDrop delivery request',
+        body: 'A delivery is available nearby. Tap to review the offer.',
+      },
+      data: { type: 'driver_offer', bookingId },
+      android: { priority: 'high', notification: { channelId: 'booking_updates' } },
+      apns: { payload: { aps: { sound: 'default' } } },
+    });
+  } catch (error) {
+    console.warn(`FCM notification failed for driver ${driver.id}`, error);
+  }
 }

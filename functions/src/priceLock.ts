@@ -2,8 +2,9 @@ import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import { Firestore, Timestamp, FieldValue } from 'firebase-admin/firestore';
 import { getFirestore } from 'firebase-admin/firestore';
 import { getConfig, AppConfig } from './config';
-import { calculateFare, haversineKm, estimateDurationMinutes, GeoPoint } from './fare';
+import { calculateFare, GeoPoint } from './fare';
 import { getVehiclePricing } from './booking';
+import { calculateRoadRoute, googleMapsServerKey } from './routing';
 
 export interface PriceLockRequest {
   pickup: GeoPoint;
@@ -14,6 +15,7 @@ export interface PriceLockRequest {
   goodsType?: string;
   notes?: string;
   loadingHelper?: boolean;
+  stops?: Array<{ address: string; lat: number; lng: number }>;
 }
 
 export interface PriceLockResponse {
@@ -71,6 +73,7 @@ export interface PriceLockData {
   loadingHelper?: boolean;
   version: number;
   status: 'active' | 'expired' | 'used' | 'cancelled';
+  stops?: Array<{ address: string; lat: number; lng: number }>;
   createdAt: Timestamp;
   expiresAt: Timestamp;
   usedAt?: Timestamp;
@@ -83,7 +86,7 @@ export interface PriceLockData {
  * The price shown at booking is locked; changes only allowed with
  * explicit customer approval (add stop, change destination, extend wait).
  */
-export const createPriceLock = onCall<PriceLockRequest>(async (request) => {
+export const createPriceLock = onCall<PriceLockRequest>({ secrets: [googleMapsServerKey] }, async (request) => {
   const uid = requireAuth(request);
   const data = request.data;
   
@@ -95,12 +98,17 @@ export const createPriceLock = onCall<PriceLockRequest>(async (request) => {
   const config = await getConfig(db);
   const vehicle = await getVehiclePricing(db, data.vehicleTypeId);
 
-  const distanceKm = haversineKm(data.pickup, data.drop);
+  const stops = Array.isArray(data.stops) ? data.stops : [];
+  if (stops.length > 5 || stops.some((p) => !Number.isFinite(p.lat) || !Number.isFinite(p.lng) || p.lat < -90 || p.lat > 90 || p.lng < -180 || p.lng > 180 || !p.address?.trim())) {
+    throw new HttpsError('invalid-argument', 'Use up to five stops with a label and valid map position.');
+  }
+  const route = await calculateRoadRoute([data.pickup, ...stops, data.drop]);
+  const distanceKm = route.distanceKm;
   if (distanceKm < 0.05) {
     throw new HttpsError('failed-precondition', 'Pickup and drop are too close.');
   }
 
-  const durationMinutes = estimateDurationMinutes(distanceKm);
+  const durationMinutes = route.durationMinutes;
   const fare = calculateFare({
     vehicle,
     distanceKm,
@@ -108,6 +116,9 @@ export const createPriceLock = onCall<PriceLockRequest>(async (request) => {
     surgeMultiplier: config.surgeMultiplier * (vehicle.surgeMultiplier ?? 1),
     gstPercent: config.gstPercent,
   });
+  const stopFee = stops.length * config.multiStopFee;
+  const stopGst = Math.round(stopFee * config.gstPercent) / 100;
+  const totalFare = { ...fare, stopFee, subtotal: fare.subtotal + stopFee, gst: Math.round((fare.gst + stopGst) * 100) / 100, total: Math.round((fare.total + stopFee + stopGst) * 100) / 100 };
 
   // Create price lock document - immutable once created
   const priceLockRef = db.collection('priceLocks').doc();
@@ -132,11 +143,12 @@ export const createPriceLock = onCall<PriceLockRequest>(async (request) => {
     vehicleTypeName: vehicle.name,
     distanceKm,
     estimatedDurationMin: durationMinutes,
-    fareBreakdown: fare,
+    fareBreakdown: totalFare,
     surgeMultiplier: config.surgeMultiplier * (vehicle.surgeMultiplier ?? 1),
     goodsType: data.goodsType ?? '',
     notes: data.notes ?? '',
     loadingHelper: data.loadingHelper ?? false,
+    stops,
     version: 1,
     status: 'active',
     createdAt: Timestamp.now(),
@@ -147,7 +159,7 @@ export const createPriceLock = onCall<PriceLockRequest>(async (request) => {
 
   return {
     priceLockId: priceLockRef.id,
-    fareBreakdown: fare,
+    fareBreakdown: totalFare,
     distanceKm,
     estimatedDurationMin: durationMinutes,
     vehicleTypeId: data.vehicleTypeId,
@@ -224,7 +236,7 @@ export const updatePriceLock = onCall<{
   addStop?: boolean;
   extendWaitMinutes?: number;
   customerApproved: boolean;
-}>(async (request) => {
+}>({ secrets: [googleMapsServerKey] }, async (request) => {
   const uid = requireAuth(request);
   const { priceLockId, newDrop, newPickup, addStop, extendWaitMinutes, customerApproved } = request.data ?? {};
 
@@ -264,7 +276,8 @@ export const updatePriceLock = onCall<{
     const drop = newDrop ? { lat: newDrop.lat, lng: newDrop.lng } : { lat: data.drop.lat, lng: data.drop.lng };
 
     // Recalculate distance and duration
-    const distanceKm = haversineKm(pickup, drop);
+    const route = await calculateRoadRoute([{ lat: pickup.lat, lng: pickup.lng }, ...(data.stops ?? []), { lat: drop.lat, lng: drop.lng }]);
+    const distanceKm = route.distanceKm;
     if (distanceKm < 0.05) {
       throw new HttpsError('failed-precondition', 'Pickup and drop are too close.');
     }
@@ -273,7 +286,7 @@ export const updatePriceLock = onCall<{
     const config = await getConfig(db2);
     const vehicle = await getVehiclePricing(db2, data.vehicleTypeId);
 
-    const durationMinutes = estimateDurationMinutes(distanceKm);
+    const durationMinutes = route.durationMinutes;
     
     // Calculate additional waiting charge if extended
     let waitMinutes = 0;

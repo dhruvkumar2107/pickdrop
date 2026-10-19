@@ -10,6 +10,7 @@ export interface AppConfig {
   driverOfferTimeoutSeconds: number;
   maxMatchingDurationMinutes: number;
   gstPercent: number;
+  multiStopFee: number;
 }
 
 export const DEFAULT_CONFIG: AppConfig = {
@@ -21,6 +22,7 @@ export const DEFAULT_CONFIG: AppConfig = {
   driverOfferTimeoutSeconds: 30,
   maxMatchingDurationMinutes: 3,
   gstPercent: 5,
+  multiStopFee: 65,
 };
 
 /** Reads `config/app`, falling back to defaults for any missing field. */
