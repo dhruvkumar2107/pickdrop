@@ -1,5 +1,18 @@
 # Audit — 2026-10-19 (rewritten against disk truth)
 
+## Client-write vs Firestore rules audit — 2026-10-19
+
+Verified every reachable client write against `firestore.rules`; fixed writes the rules deny (which previously failed silently and produced false-success UI):
+
+- Instant-refund card now calls the `requestInstantRefund` callable instead of writing `reports` + crediting `wallets` client-side (both denied). Copy no longer promises an automatic refund.
+- Removed dead `DriverMatchingService.handleDriverCancel` that wrote denied `driverPenalties` and credited `wallets`; `DriverReliabilityModel` (still used) retained.
+- Bookings flow reduced to `reportExtraCashRequested` (callable); removed dead `PriceLockModel`/`createPriceLock`/`submitCustomFareOffer` (`priceLocks`/`fareBids` denied) and deleted the unreachable `offer_your_price_sheet.dart`.
+- Removed dead `applyCoupon` (`coupons` writes denied; the live flow uses a server callable).
+- `AuthRemoteDataSource.deleteAccount` now calls the `deleteAccount` callable and signs out instead of deleting the `users` doc client-side (denied) then `user.delete()`.
+- Confirmed conforming reachable writes: `users` create/update (allowed key set), `drivers` location/online updates, `safetyContacts` create (exact field set), `reports` SOS create (`reporterId`), profile display-name edit.
+- Latent (unreachable) denied write left in place: `driver_remote_datasource.updateDriverProfile` can write `vehicleTypeId`/`vehicleNumber`/`vehicleModel` (not in the allowed `drivers` update set); the provider is never watched and driver onboarding uses the `submitDriverKyc` callable, so it is dead code.
+- Checks: `flutter analyze` 0 errors / 0 warnings, `flutter test` 7/7, `dart analyze` clean on edited files.
+
 ## Follow-up implementation update — 2026-10-19
 
 - Latest follow-up: rejected KYC can be resubmitted through an authenticated callable; the driver sees the rejection reason and vehicle options now come from the live catalog. Scheduled bookings carry up to five map-pinned stops through road pricing, dispatch, per-stop OTPs and trip completion. Chat now uses booking-scoped messages with both-trip-participant authorization. SOS creates a server-side incident, records available GPS, notifies the assigned driver and appears in the admin queue. Referral codes are server-issued, checked at booking, and credit both wallets once after a completed trip. Admin can inspect and edit seeded vehicle prices.
