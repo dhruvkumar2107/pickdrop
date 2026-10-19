@@ -15,6 +15,7 @@ class ScheduledBookingModel {
   final double dropLat;
   final double dropLng;
   final String dropAddress;
+  final List<Map<String, dynamic>> intermediateStops;
   final String vehicleType;
   final String goodsType;
   final double estimatedFare;
@@ -32,6 +33,7 @@ class ScheduledBookingModel {
     required this.dropLat,
     required this.dropLng,
     required this.dropAddress,
+    this.intermediateStops = const [],
     required this.vehicleType,
     required this.goodsType,
     required this.estimatedFare,
@@ -62,6 +64,7 @@ class ScheduledBookingModel {
       dropLat: dropLat,
       dropLng: dropLng,
       dropAddress: dropAddress,
+      intermediateStops: intermediateStops,
       vehicleType: vehicleType,
       goodsType: goodsType,
       estimatedFare: estimatedFare ?? this.estimatedFare,
@@ -82,6 +85,7 @@ class ScheduledBookingModel {
       'dropLat': dropLat,
       'dropLng': dropLng,
       'dropAddress': dropAddress,
+      'intermediateStops': intermediateStops,
       'vehicleType': vehicleType,
       'goodsType': goodsType,
       'estimatedFare': estimatedFare,
@@ -103,6 +107,10 @@ class ScheduledBookingModel {
       dropLat: (json['dropLat'] as num?)?.toDouble() ?? 0,
       dropLng: (json['dropLng'] as num?)?.toDouble() ?? 0,
       dropAddress: json['dropAddress'] as String? ?? '',
+      intermediateStops: (json['intermediateStops'] as List<dynamic>? ?? const [])
+          .whereType<Map>()
+          .map((stop) => Map<String, dynamic>.from(stop))
+          .toList(),
       vehicleType: json['vehicleType'] as String? ?? '',
       goodsType: json['goodsType'] as String? ?? '',
       estimatedFare: (json['estimatedFare'] as num?)?.toDouble() ?? 0,

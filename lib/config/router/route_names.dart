@@ -42,6 +42,7 @@ class RouteNames {
   static const String driverPayouts = '/driver/payouts';
   static const String driverProfile = '/driver/profile';
   static const String driverVerification = '/driver/verification';
+  static const String adminReview = '/admin/review';
 
   // Common routes
   static const String chat = '/common/chat';

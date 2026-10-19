@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:share_plus/share_plus.dart';
 
+import '../../../../../config/env/env_config.dart';
 import '../../../../../core/constants/colors.dart';
 import '../../../../../core/theme/design_tokens.dart';
 import '../../../../../core/utils/helpers.dart';
@@ -8,35 +10,39 @@ import '../../../../../core/widgets/app_toast.dart';
 import '../../../../../core/widgets/glass_card.dart';
 import '../../../../../core/widgets/gradient_button.dart';
 
-class ReferralBanner extends StatelessWidget {
-  final String phoneNumber;
+class ReferralBanner extends StatefulWidget {
+  const ReferralBanner({super.key});
 
-  const ReferralBanner({
-    super.key,
-    this.phoneNumber = '+919876543210',
-  });
+  @override
+  State<ReferralBanner> createState() => _ReferralBannerState();
+}
 
-  String get _referralCode {
-    final digits = phoneNumber.replaceAll(RegExp(r'\D'), '');
-    final source = digits.length >= 6 ? phoneNumber : '+919876543210';
-    return AppHelpers.generateReferralCode(source);
+class _ReferralBannerState extends State<ReferralBanner> {
+  late final Future<String> _codeFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _codeFuture = _loadCode();
   }
 
-  Future<void> _copyCode(BuildContext context) async {
-    final code = _referralCode;
+  Future<String> _loadCode() async {
+    final result = await FirebaseFunctions.instanceFor(region: EnvConfig.functionsRegion)
+        .httpsCallable('getReferralCode').call();
+    return (Map<String, dynamic>.from(result.data as Map)['code'] as String).toUpperCase();
+  }
+
+  Future<void> _copyCode(BuildContext context, String code) async {
     AppHelpers.copyToClipboard(code);
     if (!context.mounted) return;
     AppToast.success(context, 'Referral code copied: $code');
   }
 
-  Future<void> _shareInvite(BuildContext context) async {
-    final code = _referralCode;
+  Future<void> _shareInvite(BuildContext context, String code) async {
     try {
       await SharePlus.instance.share(
         ShareParams(
-          text: 'Use my PickDrop referral code $code and we both get ₹50. '
-              'You get ₹50 off your first delivery, and ₹50 lands in my wallet. '
-              'Download PickDrop and add the code at checkout.',
+          text: 'Use my PickDrop referral code $code. You and I each receive ₹50 wallet credit after your first completed delivery. Download PickDrop and enter the code at checkout.',
           subject: 'PickDrop referral code $code',
         ),
       );
@@ -47,8 +53,21 @@ class ReferralBanner extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    return FutureBuilder<String>(
+      future: _codeFuture,
+      builder: (context, snapshot) {
+        if (!snapshot.hasData) {
+          return GlassCard(
+            child: Text(snapshot.hasError ? 'Referral codes are unavailable right now.' : 'Loading your referral code…'),
+          );
+        }
+        return _buildCard(context, snapshot.data!);
+      },
+    );
+  }
+
+  Widget _buildCard(BuildContext context, String code) {
     final colors = context.colors;
-    final code = _referralCode;
 
     return GlassCard(
       radius: DesignTokens.radiusLg,
@@ -119,7 +138,7 @@ class ReferralBanner extends StatelessWidget {
                   ),
                 ),
                 TextButton.icon(
-                  onPressed: () => _copyCode(context),
+                  onPressed: () => _copyCode(context, code),
                   icon: Icon(
                     Icons.copy_rounded,
                     size: DesignTokens.iconSm,
@@ -141,7 +160,7 @@ class ReferralBanner extends StatelessWidget {
                   text: 'Share invite',
                   leadingIcon: Icons.share_rounded,
                   height: DesignTokens.buttonHeightMd,
-                  onPressed: () => _shareInvite(context),
+                  onPressed: () => _shareInvite(context, code),
                 ),
               ),
             ],

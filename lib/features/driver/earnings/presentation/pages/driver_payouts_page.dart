@@ -1,5 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:flutter/material.dart';
 
 import '../../../../../core/constants/colors.dart';
@@ -8,6 +9,7 @@ import '../../../../../core/widgets/app_toast.dart';
 import '../../../../../core/widgets/gradient_button.dart';
 import '../../../../../core/widgets/inputs/inputs.dart';
 import '../../../../../core/widgets/status_chip.dart';
+import '../../../../../config/env/env_config.dart';
 import '../widgets/payout_history_list.dart';
 
 class DriverPayoutsPage extends StatefulWidget {
@@ -20,7 +22,7 @@ class DriverPayoutsPage extends StatefulWidget {
 class _DriverPayoutsPageState extends State<DriverPayoutsPage> {
   static const double minPayout = 100;
 
-  static const double fallbackBalance = 640;
+  static const double fallbackBalance = 0;
 
   final TextEditingController _upiController = TextEditingController();
 
@@ -89,15 +91,12 @@ class _DriverPayoutsPageState extends State<DriverPayoutsPage> {
     final amount = _amount;
     final upi = _upiController.text.trim();
     try {
-      await FirebaseFirestore.instance.collection('driverPayouts').add(
-        <String, dynamic>{
-          'driverId': uid,
-          'amount': amount,
-          'upiId': upi,
-          'status': 'REQUESTED',
-          'createdAt': FieldValue.serverTimestamp(),
-        },
-      );
+      final result = await FirebaseFunctions.instanceFor(region: EnvConfig.functionsRegion)
+          .httpsCallable('requestPayout')
+          .call<Map<String, dynamic>>({'amount': amount, 'upiId': upi});
+      if (result.data['status'] != 'PENDING_REVIEW') {
+        throw StateError('The payout request was not accepted for review.');
+      }
       if (!mounted) return;
       setState(() {
         _submitting = false;
@@ -107,7 +106,7 @@ class _DriverPayoutsPageState extends State<DriverPayoutsPage> {
       });
       AppToast.success(
         context,
-        'Payout of ₹${amount.toStringAsFixed(0)} requested — arrives in up to 30 minutes',
+        'Payout request for ₹${amount.toStringAsFixed(0)} submitted for review. It has not been transferred yet.',
       );
     } catch (_) {
       if (!mounted) return;
@@ -165,7 +164,7 @@ class _DriverPayoutsPageState extends State<DriverPayoutsPage> {
           ),
           const SizedBox(height: DesignTokens.spacingXs),
           Text(
-            'Withdraw your earnings to any UPI ID — most transfers land in under 30 minutes.',
+            'Request a payout to your UPI ID. Requests remain pending until an operator completes the transfer.',
             style: TextStyle(
               fontFamily: 'Poppins',
               fontSize: 12,
@@ -219,8 +218,8 @@ class _DriverPayoutsPageState extends State<DriverPayoutsPage> {
                   ),
                 ),
                 const StatusChip(
-                  label: 'Instant UPI',
-                  status: AppChipStatus.success,
+                  label: 'Manual review',
+                  status: AppChipStatus.warning,
                   dense: true,
                 ),
               ],
@@ -254,8 +253,7 @@ class _DriverPayoutsPageState extends State<DriverPayoutsPage> {
             ),
             const SizedBox(height: DesignTokens.spacingSm),
             Text(
-              'Payouts under ₹100 are not available yet. Funds settle on the '
-              'instant UPI rails, usually within 30 minutes.',
+              'Minimum request is ₹100. Submitting a request does not transfer funds; support must review and complete it.',
               style: TextStyle(
                 fontFamily: 'Poppins',
                 fontSize: 11,

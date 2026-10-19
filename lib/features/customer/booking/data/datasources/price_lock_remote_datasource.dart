@@ -1,4 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart';
+
+import '../../../../../config/env/env_config.dart';
 
 class PriceLockModel {
   final String lockId;
@@ -49,7 +52,8 @@ class PriceLockModel {
       'lockedAt': Timestamp.fromDate(lockedAt),
       'expiresAt': Timestamp.fromDate(expiresAt),
       'isApproved': isApproved,
-      'priceGuaranteePromise': 'Price Lock: Final fare will not change without explicit approval',
+      'priceGuaranteePromise':
+          'Price Lock: Final fare will not change without explicit approval',
     };
   }
 
@@ -68,7 +72,9 @@ class PriceLockModel {
       total: (data['total'] as num?)?.toDouble() ?? 0.0,
       freeWaitingMinutes: data['freeWaitingMinutes'] ?? 10,
       lockedAt: (data['lockedAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
-      expiresAt: (data['expiresAt'] as Timestamp?)?.toDate() ?? DateTime.now().add(const Duration(minutes: 30)),
+      expiresAt:
+          (data['expiresAt'] as Timestamp?)?.toDate() ??
+          DateTime.now().add(const Duration(minutes: 30)),
       isApproved: data['isApproved'] ?? true,
     );
   }
@@ -77,9 +83,8 @@ class PriceLockModel {
 class PriceLockRemoteDataSource {
   final FirebaseFirestore _firestore;
 
-  PriceLockRemoteDataSource({
-    FirebaseFirestore? firestore,
-  })  : _firestore = firestore ?? FirebaseFirestore.instance;
+  PriceLockRemoteDataSource({FirebaseFirestore? firestore})
+    : _firestore = firestore ?? FirebaseFirestore.instance;
 
   /// Creates a local or remote price lock document in Firestore
   Future<PriceLockModel> createPriceLock({
@@ -122,25 +127,17 @@ class PriceLockRemoteDataSource {
   /// Reports driver asking for extra money (Anti-Extra-Cash Guarantee)
   Future<bool> reportExtraCashRequested({
     required String bookingId,
-    required String driverId,
     required double extraCashAmount,
     required String reason,
   }) async {
-    try {
-      await _firestore.collection('reports').add({
-        'type': 'EXTRA_CASH_ASKED',
-        'bookingId': bookingId,
-        'driverId': driverId,
-        'amount': extraCashAmount,
-        'reason': reason,
-        'timestamp': FieldValue.serverTimestamp(),
-        'actionTaken': 'AUTO_REFUND_WALLET_STRIKE_INITIATED',
-        'status': 'INVESTIGATING',
-      });
-      return true;
-    } catch (_) {
-      return true; // Optimistic confirmation in demo mode
-    }
+    await FirebaseFunctions.instanceFor(region: EnvConfig.functionsRegion)
+        .httpsCallable('reportExtraCash')
+        .call({
+          'bookingId': bookingId,
+          'extraCashAmount': extraCashAmount,
+          'reason': reason,
+        });
+    return true;
   }
 
   /// Offer Your Price (inDrive style mode)
@@ -150,7 +147,9 @@ class PriceLockRemoteDataSource {
     required double minimumFloorFare,
   }) async {
     if (proposedFare < minimumFloorFare) {
-      throw Exception('Offered fare cannot be less than the minimum base floor of ₹${minimumFloorFare.toStringAsFixed(0)}');
+      throw Exception(
+        'Offered fare cannot be less than the minimum base floor of ₹${minimumFloorFare.toStringAsFixed(0)}',
+      );
     }
     try {
       await _firestore.collection('fareBids').add({

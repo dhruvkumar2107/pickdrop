@@ -75,7 +75,7 @@ class _EmptyState extends StatelessWidget {
         borderRadius: BorderRadius.circular(DesignTokens.radiusMd),
       ),
       child: Text(
-        'No payouts yet. Your first instant withdrawal can start from ₹100.',
+        'No payout requests yet.',
         textAlign: TextAlign.center,
         style: TextStyle(
           fontFamily: 'Poppins',

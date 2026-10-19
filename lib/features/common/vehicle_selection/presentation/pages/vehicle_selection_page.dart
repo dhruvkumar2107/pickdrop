@@ -32,7 +32,8 @@ class VehicleSelectionPage extends ConsumerStatefulWidget {
   });
 
   @override
-  ConsumerState<VehicleSelectionPage> createState() => _VehicleSelectionPageState();
+  ConsumerState<VehicleSelectionPage> createState() =>
+      _VehicleSelectionPageState();
 }
 
 class _VehicleSelectionPageState extends ConsumerState<VehicleSelectionPage> {
@@ -53,12 +54,14 @@ class _VehicleSelectionPageState extends ConsumerState<VehicleSelectionPage> {
   }
 
   void _calculateDistanceAndDuration() {
-    _distanceKm = AppHelpers.calculateDistance(
-      widget.pickupLat,
-      widget.pickupLng,
-      widget.dropLat,
-      widget.dropLng,
-    ) / 1000;
+    _distanceKm =
+        AppHelpers.calculateDistance(
+          widget.pickupLat,
+          widget.pickupLng,
+          widget.dropLat,
+          widget.dropLng,
+        ) /
+        1000;
 
     _estimatedDurationMin = (_distanceKm / 30 * 60).ceil();
   }
@@ -82,16 +85,14 @@ class _VehicleSelectionPageState extends ConsumerState<VehicleSelectionPage> {
 
       if (!mounted) return;
       setState(() {
-        _vehicleTypes = loaded.isNotEmpty ? loaded : VehicleType.defaults;
+        _vehicleTypes = loaded;
         _isLoadingVehicles = false;
       });
     } catch (_) {
-      // Offline or unseeded catalog: fall back to the built-in defaults so the
-      // booking flow stays usable. The server recomputes the authoritative
-      // fare on createBooking regardless of the values shown here.
       if (!mounted) return;
       setState(() {
-        _vehicleTypes = VehicleType.defaults;
+        _vehicleTypes = [];
+        _error = 'Could not load the live vehicle catalog. Check your connection and retry.';
         _isLoadingVehicles = false;
       });
     }
@@ -171,10 +172,10 @@ class _VehicleSelectionPageState extends ConsumerState<VehicleSelectionPage> {
 
   VehicleType? get _bestValueVehicle {
     if (_vehicleTypes.isEmpty) return null;
-    
+
     VehicleType? best;
     double bestRatio = double.infinity;
-    
+
     for (final vehicle in _vehicleTypes) {
       final fare = _totalFare(vehicle);
       final capacity = vehicle.capacityKg.toDouble();
@@ -199,7 +200,9 @@ class _VehicleSelectionPageState extends ConsumerState<VehicleSelectionPage> {
       return;
     }
 
-    final selectedVehicle = _vehicleTypes.firstWhere((v) => v.id == _selectedVehicleTypeId);
+    final selectedVehicle = _vehicleTypes.firstWhere(
+      (v) => v.id == _selectedVehicleTypeId,
+    );
     final fareBreakdown = _calculateFare(selectedVehicle);
 
     context.go(
@@ -261,7 +264,8 @@ class _VehicleSelectionPageState extends ConsumerState<VehicleSelectionPage> {
       body: Column(
         children: [
           _buildRouteHeader(),
-          if (!_isLoadingVehicles && _vehicleTypes.isNotEmpty) _buildSmartRecommendationCard(),
+          if (!_isLoadingVehicles && _vehicleTypes.isNotEmpty)
+            _buildSmartRecommendationCard(),
           Expanded(child: _buildVehicleList()),
           _buildBottomBar(),
         ],
@@ -407,11 +411,7 @@ class _VehicleSelectionPageState extends ConsumerState<VehicleSelectionPage> {
               ),
               Padding(
                 padding: const EdgeInsets.only(left: 15),
-                child: Container(
-                  width: 2,
-                  height: 16,
-                  color: colors.outline,
-                ),
+                child: Container(width: 2, height: 16, color: colors.outline),
               ),
               _RoutePoint(
                 icon: Icons.location_on_rounded,
@@ -505,17 +505,17 @@ class _VehicleSelectionPageState extends ConsumerState<VehicleSelectionPage> {
         final isRecommended = _recommendedVehicle?.id == vehicle.id;
 
         return _VehicleOptionCard(
-          vehicle: vehicle,
-          icon: _vehicleIcon(vehicle.id),
-          etaMinutes: _estimatedDurationMin,
-          distanceKm: _distanceKm,
-          estimatedFare: fare,
-          isSelected: isSelected,
-          isRecommended: isRecommended,
-          isBestValue: isBestValue,
-          onTap: () => _selectVehicle(vehicle),
-          onFareBreakdown: () => _showFareBreakdown(vehicle),
-        )
+              vehicle: vehicle,
+              icon: _vehicleIcon(vehicle.id),
+              etaMinutes: _estimatedDurationMin,
+              distanceKm: _distanceKm,
+              estimatedFare: fare,
+              isSelected: isSelected,
+              isRecommended: isRecommended,
+              isBestValue: isBestValue,
+              onTap: () => _selectVehicle(vehicle),
+              onFareBreakdown: () => _showFareBreakdown(vehicle),
+            )
             .animate()
             .fadeIn(
               duration: DesignTokens.durationNormal,
@@ -532,102 +532,111 @@ class _VehicleSelectionPageState extends ConsumerState<VehicleSelectionPage> {
     final fare = _barFare;
 
     return Container(
-      decoration: BoxDecoration(
-        color: colors.surfaceCard,
-        borderRadius: const BorderRadius.vertical(
-          top: Radius.circular(DesignTokens.radiusXl),
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: colors.shadow.withValues(alpha: 0.15),
-            blurRadius: 24,
-            offset: const Offset(0, -8),
-          ),
-        ],
-      ),
-      child: SafeArea(
-        top: false,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(
-            DesignTokens.spacingLg,
-            DesignTokens.spacingMd,
-            DesignTokens.spacingLg,
-            DesignTokens.spacingMd,
-          ),
-          child: Row(
-            children: [
-              Expanded(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      selected?.name ?? AppStrings.selectVehicle,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TokenTextStyles.labelSmall(
-                        color: colors.onSurfaceVariant,
-                        letterSpacing: 0.6,
-                      ),
-                    ),
-                    SizedBox(height: DesignTokens.spacingXxs),
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.baseline,
-                      textBaseline: TextBaseline.alphabetic,
-                      children: [
-                        PDPrice(
-                          amount: fare,
-                          size: PDPriceSize.md,
-                          color: colors.primary,
-                        ),
-                        const SizedBox(width: DesignTokens.spacingSm),
-                        Flexible(
-                          child: Text(
-                            selected != null
-                                ? AppStrings.estimatedFare
-                                : 'Starting at',
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TokenTextStyles.bodySmall(color: colors.onSurfaceVariant),
-                          ),
-                        ),
-                      ],
-                    ),
-                    if (selected != null) ...[
-                      SizedBox(height: DesignTokens.spacingXxs),
-                      Text(
-                        '${_distanceKm.toStringAsFixed(1)} km • $_estimatedDurationMin min • incl. ${AppStrings.gst}',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TokenTextStyles.labelSmall(color: colors.onSurfaceVariant),
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-              SizedBox(width: DesignTokens.spacingSm),
-              PDButton(
-                text: 'Fare Details',
-                variant: PDButtonVariant.outline,
-                size: PDButtonSize.sm,
-                onPressed: selected != null ? () => _showFareBreakdown(selected) : null,
-              ),
-              SizedBox(width: DesignTokens.spacingSm),
-              PDButton(
-                text: AppStrings.continueButton,
-                trailingIcon: Icons.arrow_forward_rounded,
-                variant: PDButtonVariant.primary,
-                size: PDButtonSize.md,
-                isFullWidth: false,
-                onPressed: _selectedVehicleTypeId != null ? _confirmSelection : null,
+          decoration: BoxDecoration(
+            color: colors.surfaceCard,
+            borderRadius: const BorderRadius.vertical(
+              top: Radius.circular(DesignTokens.radiusXl),
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: colors.shadow.withValues(alpha: 0.15),
+                blurRadius: 24,
+                offset: const Offset(0, -8),
               ),
             ],
           ),
-        ),
-      ),
-    ).animate()
-      .fadeIn(duration: DesignTokens.durationNormal, delay: 80.ms)
-      .slideY(begin: 0.2, end: 0);
+          child: SafeArea(
+            top: false,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(
+                DesignTokens.spacingLg,
+                DesignTokens.spacingMd,
+                DesignTokens.spacingLg,
+                DesignTokens.spacingMd,
+              ),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          selected?.name ?? AppStrings.selectVehicle,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TokenTextStyles.labelSmall(
+                            color: colors.onSurfaceVariant,
+                            letterSpacing: 0.6,
+                          ),
+                        ),
+                        SizedBox(height: DesignTokens.spacingXxs),
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.baseline,
+                          textBaseline: TextBaseline.alphabetic,
+                          children: [
+                            PDPrice(
+                              amount: fare,
+                              size: PDPriceSize.md,
+                              color: colors.primary,
+                            ),
+                            const SizedBox(width: DesignTokens.spacingSm),
+                            Flexible(
+                              child: Text(
+                                selected != null
+                                    ? AppStrings.estimatedFare
+                                    : 'Starting at',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TokenTextStyles.bodySmall(
+                                  color: colors.onSurfaceVariant,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        if (selected != null) ...[
+                          SizedBox(height: DesignTokens.spacingXxs),
+                          Text(
+                            '${_distanceKm.toStringAsFixed(1)} km • $_estimatedDurationMin min • incl. ${AppStrings.gst}',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TokenTextStyles.labelSmall(
+                              color: colors.onSurfaceVariant,
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                  SizedBox(width: DesignTokens.spacingSm),
+                  PDButton(
+                    text: 'Fare Details',
+                    variant: PDButtonVariant.outline,
+                    size: PDButtonSize.sm,
+                    onPressed: selected != null
+                        ? () => _showFareBreakdown(selected)
+                        : null,
+                  ),
+                  SizedBox(width: DesignTokens.spacingSm),
+                  PDButton(
+                    text: AppStrings.continueButton,
+                    trailingIcon: Icons.arrow_forward_rounded,
+                    variant: PDButtonVariant.primary,
+                    size: PDButtonSize.md,
+                    isFullWidth: false,
+                    onPressed: _selectedVehicleTypeId != null
+                        ? _confirmSelection
+                        : null,
+                  ),
+                ],
+              ),
+            ),
+          ),
+        )
+        .animate()
+        .fadeIn(duration: DesignTokens.durationNormal, delay: 80.ms)
+        .slideY(begin: 0.2, end: 0);
   }
 }
 
@@ -718,8 +727,20 @@ class _StatTile extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(value, maxLines: 1, overflow: TextOverflow.ellipsis, style: TokenTextStyles.titleSmall(color: tint)),
-                Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: TokenTextStyles.labelSmall(color: tint.withValues(alpha: 0.8))),
+                Text(
+                  value,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TokenTextStyles.titleSmall(color: tint),
+                ),
+                Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TokenTextStyles.labelSmall(
+                    color: tint.withValues(alpha: 0.8),
+                  ),
+                ),
               ],
             ),
           ),
@@ -757,7 +778,8 @@ class _VehicleOptionCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    final accentColor = DesignTokens.vehicleColors[vehicle.id] ?? colors.primary;
+    final accentColor =
+        DesignTokens.vehicleColors[vehicle.id] ?? colors.primary;
 
     return PDVehicleCard(
       vehicleType: vehicle.id,
@@ -809,10 +831,22 @@ class _FareBreakdownSheet extends StatelessWidget {
           ),
           SizedBox(height: DesignTokens.spacingLg),
           _fareLine(colors, 'Base Fare', fare['baseFare'] ?? 0),
-          _fareLine(colors, 'Distance (${distanceKm.toStringAsFixed(1)} km @ ₹${vehicle.perKmRate}/km)', fare['distanceFare'] ?? 0),
-          _fareLine(colors, 'Time ($durationMin min @ ₹${vehicle.perMinuteRate}/min)', fare['timeFare'] ?? 0),
+          _fareLine(
+            colors,
+            'Distance (${distanceKm.toStringAsFixed(1)} km @ ₹${vehicle.perKmRate}/km)',
+            fare['distanceFare'] ?? 0,
+          ),
+          _fareLine(
+            colors,
+            'Time ($durationMin min @ ₹${vehicle.perMinuteRate}/min)',
+            fare['timeFare'] ?? 0,
+          ),
           if ((fare['surgeAmount'] ?? 0) > 0)
-            _fareLine(colors, 'Surge (${(fare['surgeMultiplier'] ?? 1).toStringAsFixed(1)}x)', fare['surgeAmount'] ?? 0),
+            _fareLine(
+              colors,
+              'Surge (${(fare['surgeMultiplier'] ?? 1).toStringAsFixed(1)}x)',
+              fare['surgeAmount'] ?? 0,
+            ),
           Divider(color: colors.outlineVariant, height: DesignTokens.spacingLg),
           _fareLine(colors, 'Subtotal', fare['subtotal'] ?? 0),
           _fareLine(colors, 'GST (5%)', fare['gst'] ?? 0),
@@ -830,16 +864,24 @@ class _FareBreakdownSheet extends StatelessWidget {
     );
   }
 
-  Widget _fareLine(AppColorsExtension colors, String label, double amount, {bool isTotal = false}) {
+  Widget _fareLine(
+    AppColorsExtension colors,
+    String label,
+    double amount, {
+    bool isTotal = false,
+  }) {
     return Padding(
       padding: EdgeInsets.only(bottom: DesignTokens.spacingSm),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(label, style: TokenTextStyles.bodySmall(
-            color: isTotal ? colors.onSurface : colors.onSurfaceVariant,
-            weight: isTotal ? DesignTokens.wSemiBold : DesignTokens.wRegular,
-          )),
+          Text(
+            label,
+            style: TokenTextStyles.bodySmall(
+              color: isTotal ? colors.onSurface : colors.onSurfaceVariant,
+              weight: isTotal ? DesignTokens.wSemiBold : DesignTokens.wRegular,
+            ),
+          ),
           PDPrice(
             amount: amount,
             size: isTotal ? PDPriceSize.md : PDPriceSize.sm,

@@ -1,5 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 
+import '../../../../../config/env/env_config.dart';
 import '../models/scheduled_booking_model.dart';
 
 /// Firestore CRUD for the `scheduledBookings` collection.
@@ -11,9 +13,13 @@ class ScheduledBookingRemoteDataSource {
   static const Duration assignmentLeadTime = Duration(minutes: 30);
 
   final FirebaseFirestore _firestore;
+  final FirebaseFunctions _functions;
 
-  ScheduledBookingRemoteDataSource({FirebaseFirestore? firestore})
-      : _firestore = firestore ?? FirebaseFirestore.instance;
+  ScheduledBookingRemoteDataSource({
+    FirebaseFirestore? firestore,
+    FirebaseFunctions? functions,
+  })  : _firestore = firestore ?? FirebaseFirestore.instance,
+        _functions = functions ?? FirebaseFunctions.instanceFor(region: EnvConfig.functionsRegion);
 
   Future<ScheduledBookingModel> create({
     required String customerId,
@@ -25,13 +31,29 @@ class ScheduledBookingRemoteDataSource {
     required double dropLng,
     required String dropAddress,
     required String vehicleType,
+    required String vehicleTypeId,
     required String goodsType,
-    required double estimatedFare,
+    List<Map<String, dynamic>> stops = const [],
+    String referralCode = '',
   }) async {
-    final doc = _firestore.collection(collectionName).doc();
+    final result = await _functions.httpsCallable('createScheduledBooking').call({
+      'pickup': {'lat': pickupLat, 'lng': pickupLng},
+      'drop': {'lat': dropLat, 'lng': dropLng},
+      'pickupAddress': pickupAddress,
+      'dropAddress': dropAddress,
+      'vehicleType': vehicleType,
+      'vehicleTypeId': vehicleTypeId,
+      'goodsType': goodsType,
+      'referralCode': referralCode,
+      'stops': stops,
+      'paymentMethod': 'cod',
+      'scheduledAt': scheduledAt.millisecondsSinceEpoch,
+    });
+    final data = Map<String, dynamic>.from(result.data as Map);
+    final id = data['scheduledBookingId'] as String;
     final booking = ScheduledBookingModel(
-      id: doc.id,
-      customerId: customerId,
+      id: id,
+      customerId: data['customerId'] as String? ?? customerId,
       scheduledAt: scheduledAt,
       pickupLat: pickupLat,
       pickupLng: pickupLng,
@@ -41,10 +63,10 @@ class ScheduledBookingRemoteDataSource {
       dropAddress: dropAddress,
       vehicleType: vehicleType,
       goodsType: goodsType,
-      estimatedFare: estimatedFare,
+      intermediateStops: stops.map((stop) => Map<String, dynamic>.from(stop)).toList(),
+      estimatedFare: (data['estimatedFare'] as num).toDouble(),
       createdAt: DateTime.now(),
     );
-    await doc.set(booking.toMap());
     return booking;
   }
 
@@ -69,19 +91,12 @@ class ScheduledBookingRemoteDataSource {
     return ScheduledBookingModel.fromFirestore(doc);
   }
 
-  Future<void> cancel(String id) {
-    return _firestore
-        .collection(collectionName)
-        .doc(id)
-        .update({'status': ScheduledBookingModel.statusCancelled});
+  Future<void> cancel(String id) async {
+    await _functions.httpsCallable('cancelScheduledBooking').call({'scheduledBookingId': id});
   }
 
-  Future<void> assignDriver(String id, String driverId) {
-    return _firestore.collection(collectionName).doc(id).update({
-      'assignedDriverId': driverId,
-      'status': ScheduledBookingModel.statusDriverAssigned,
-    });
-  }
+  Future<void> assignDriver(String id, String driverId) async =>
+      throw UnsupportedError('Scheduled assignment is controlled by dispatch.');
 
   bool isAssignmentDue(ScheduledBookingModel booking, {DateTime? now}) {
     if (booking.isClosed || booking.assignedDriverId.isEmpty) return false;
@@ -106,12 +121,6 @@ class ScheduledBookingRemoteDataSource {
   }) async {
     final updated = ensureDriverAssignment(booking, now: now);
     if (updated.status == booking.status) return updated;
-    try {
-      await _firestore
-          .collection(collectionName)
-          .doc(booking.id)
-          .update({'status': updated.status});
-    } catch (_) {}
     return updated;
   }
 

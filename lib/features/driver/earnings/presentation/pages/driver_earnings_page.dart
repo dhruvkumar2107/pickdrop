@@ -2,6 +2,8 @@ import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:go_router/go_router.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
 import '../../../../../config/router/route_names.dart';
 import '../../../../../core/constants/colors.dart';
@@ -24,33 +26,85 @@ class _DriverEarningsPageState extends State<DriverEarningsPage>
   late TabController _tabController;
   int _selectedTab = 0;
 
-  final double _todayEarnings = 1640;
+  double _todayEarnings = 0;
   final double _dailyGoal = 2000;
-
-  final List<Map<String, dynamic>> _transactions = [
-    {'id': '#PD-2041', 'amount': 420, 'time': '2:30 PM', 'from': 'MG Road', 'to': 'Whitefield'},
-    {'id': '#PD-2040', 'amount': 340, 'time': '11:15 AM', 'from': 'Koramangala', 'to': 'HSR Layout'},
-    {'id': '#PD-2039', 'amount': 290, 'time': '9:00 AM', 'from': 'Jayanagar', 'to': 'Banashankari'},
-    {'id': '#PD-2038', 'amount': 590, 'time': 'Yesterday', 'from': 'Airport', 'to': 'Marathahalli'},
-  ];
-
-  final List<BarChartGroupData> _barGroups = [
-    BarChartGroupData(x: 0, barRods: [BarChartRodData(toY: 1200, color: const Color(0xFFFF6B00), width: 14, borderRadius: BorderRadius.circular(4))]),
-    BarChartGroupData(x: 1, barRods: [BarChartRodData(toY: 1800, color: const Color(0xFFFF6B00), width: 14, borderRadius: BorderRadius.circular(4))]),
-    BarChartGroupData(x: 2, barRods: [BarChartRodData(toY: 900, color: const Color(0xFFFF9A3C), width: 14, borderRadius: BorderRadius.circular(4))]),
-    BarChartGroupData(x: 3, barRods: [BarChartRodData(toY: 2100, color: const Color(0xFFFF6B00), width: 14, borderRadius: BorderRadius.circular(4))]),
-    BarChartGroupData(x: 4, barRods: [BarChartRodData(toY: 1500, color: const Color(0xFFFF9A3C), width: 14, borderRadius: BorderRadius.circular(4))]),
-    BarChartGroupData(x: 5, barRods: [BarChartRodData(toY: 1640, color: const Color(0xFFFF6B00), width: 14, borderRadius: BorderRadius.circular(4))]),
-    BarChartGroupData(x: 6, barRods: [BarChartRodData(toY: 0, color: const Color(0xFF2D3038), width: 14, borderRadius: BorderRadius.circular(4))]),
-  ];
+  List<Map<String, dynamic>> _transactions = [];
+  List<BarChartGroupData> _barGroups = [];
+  bool _loading = true;
 
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 3, vsync: this);
+    _loadLedger();
     _tabController.addListener(() {
       setState(() => _selectedTab = _tabController.index);
     });
+  }
+
+  Future<void> _loadLedger() async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) {
+      setState(() => _loading = false);
+      return;
+    }
+    try {
+      final snapshot = await FirebaseFirestore.instance
+          .collection('driverLedger')
+          .where('driverId', isEqualTo: uid)
+          .get();
+      final now = DateTime.now();
+      final days = List<double>.filled(7, 0);
+      final rows = <Map<String, dynamic>>[];
+      var today = 0.0;
+      for (final doc in snapshot.docs) {
+        final data = doc.data();
+        final net = (data['net'] as num? ?? 0).toDouble();
+        final timestamp = data['createdAt'];
+        final date = timestamp is Timestamp ? timestamp.toDate() : now;
+        final age = DateTime(
+          now.year,
+          now.month,
+          now.day,
+        ).difference(DateTime(date.year, date.month, date.day)).inDays;
+        if (age == 0) today += net;
+        if (age >= 0 && age < 7) days[6 - age] += net;
+        rows.add({
+          'id': doc.id,
+          'amount': net,
+          'time':
+              '${date.hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')}',
+          'from': 'Completed delivery',
+          'to':
+              'Booking ${doc.id.substring(0, doc.id.length > 8 ? 8 : doc.id.length)}',
+        });
+      }
+      rows.sort((a, b) => b['id'].toString().compareTo(a['id'].toString()));
+      if (!mounted) return;
+      setState(() {
+        _todayEarnings = today;
+        _transactions = rows;
+        _barGroups = [
+          for (var i = 0; i < 7; i++)
+            BarChartGroupData(
+              x: i,
+              barRods: [
+                BarChartRodData(
+                  toY: days[i],
+                  color: i == 6
+                      ? const Color(0xFFFF6B00)
+                      : const Color(0xFFFF9A3C),
+                  width: 14,
+                  borderRadius: BorderRadius.circular(4),
+                ),
+              ],
+            ),
+        ];
+        _loading = false;
+      });
+    } catch (_) {
+      if (mounted) setState(() => _loading = false);
+    }
   }
 
   @override
@@ -89,16 +143,20 @@ class _DriverEarningsPageState extends State<DriverEarningsPage>
                   Row(
                     children: [
                       const BackButton(color: Colors.white),
-                      Text('Earnings',
-                          style: AppTextStyles.headlineMedium
-                              .copyWith(color: Colors.white)),
+                      Text(
+                        'Earnings',
+                        style: AppTextStyles.headlineMedium.copyWith(
+                          color: Colors.white,
+                        ),
+                      ),
                     ],
                   ),
                   const SizedBox(height: AppDimensions.spacingXl),
                   Text(
                     'Today\'s Earnings',
-                    style: AppTextStyles.bodyMedium
-                        .copyWith(color: Colors.white70),
+                    style: AppTextStyles.bodyMedium.copyWith(
+                      color: Colors.white70,
+                    ),
                   ),
                   Text(
                     '₹${_todayEarnings.toStringAsFixed(0)}',
@@ -115,23 +173,31 @@ class _DriverEarningsPageState extends State<DriverEarningsPage>
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          Text('Daily Goal',
-                              style: AppTextStyles.labelMedium
-                                  .copyWith(color: Colors.white70)),
+                          Text(
+                            'Daily Goal',
+                            style: AppTextStyles.labelMedium.copyWith(
+                              color: Colors.white70,
+                            ),
+                          ),
                           Text(
                             '₹${_todayEarnings.toStringAsFixed(0)} / ₹${_dailyGoal.toStringAsFixed(0)}',
-                            style: AppTextStyles.labelMedium
-                                .copyWith(color: Colors.white),
+                            style: AppTextStyles.labelMedium.copyWith(
+                              color: Colors.white,
+                            ),
                           ),
                         ],
                       ),
                       const SizedBox(height: 8),
                       ClipRRect(
-                        borderRadius: BorderRadius.circular(AppDimensions.radiusFull),
+                        borderRadius: BorderRadius.circular(
+                          AppDimensions.radiusFull,
+                        ),
                         child: LinearProgressIndicator(
                           value: goalProgress,
                           backgroundColor: Colors.white24,
-                          valueColor: const AlwaysStoppedAnimation(Colors.white),
+                          valueColor: const AlwaysStoppedAnimation(
+                            Colors.white,
+                          ),
                           minHeight: 8,
                         ),
                       ),
@@ -172,10 +238,11 @@ class _DriverEarningsPageState extends State<DriverEarningsPage>
                     _selectedTab == 0
                         ? 'Hourly Breakdown'
                         : _selectedTab == 1
-                            ? 'Daily Breakdown'
-                            : 'Weekly Breakdown',
-                    style: AppTextStyles.titleMedium
-                        .copyWith(color: Colors.white),
+                        ? 'Daily Breakdown'
+                        : 'Weekly Breakdown',
+                    style: AppTextStyles.titleMedium.copyWith(
+                      color: Colors.white,
+                    ),
                   ),
                   const SizedBox(height: AppDimensions.spacingLg),
                   SizedBox(
@@ -190,21 +257,33 @@ class _DriverEarningsPageState extends State<DriverEarningsPage>
                             sideTitles: SideTitles(
                               showTitles: true,
                               getTitlesWidget: (value, _) {
-                                const days = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
+                                const days = [
+                                  'M',
+                                  'T',
+                                  'W',
+                                  'T',
+                                  'F',
+                                  'S',
+                                  'S',
+                                ];
                                 return Text(
                                   days[value.toInt()],
-                                  style: AppTextStyles.labelSmall
-                                      .copyWith(color: Colors.white54),
+                                  style: AppTextStyles.labelSmall.copyWith(
+                                    color: Colors.white54,
+                                  ),
                                 );
                               },
                             ),
                           ),
                           leftTitles: const AxisTitles(
-                              sideTitles: SideTitles(showTitles: false)),
+                            sideTitles: SideTitles(showTitles: false),
+                          ),
                           topTitles: const AxisTitles(
-                              sideTitles: SideTitles(showTitles: false)),
+                            sideTitles: SideTitles(showTitles: false),
+                          ),
                           rightTitles: const AxisTitles(
-                              sideTitles: SideTitles(showTitles: false)),
+                            sideTitles: SideTitles(showTitles: false),
+                          ),
                         ),
                         maxY: 2500,
                       ),
@@ -219,14 +298,22 @@ class _DriverEarningsPageState extends State<DriverEarningsPage>
           SliverToBoxAdapter(
             child: Padding(
               padding: const EdgeInsets.symmetric(
-                  horizontal: AppDimensions.spacingXl),
+                horizontal: AppDimensions.spacingXl,
+              ),
               child: Row(
                 children: [
-                  _EarningStat(label: 'Trips', value: '6'),
+                  _EarningStat(
+                    label: 'Trips',
+                    value: '${_transactions.length}',
+                  ),
                   const SizedBox(width: AppDimensions.spacingMd),
-                  _EarningStat(label: 'Avg / Trip', value: '₹273'),
+                  _EarningStat(
+                    label: 'Avg / Trip',
+                    value:
+                        '₹${_transactions.isEmpty ? '0' : (_transactions.fold<double>(0, (sum, item) => sum + (item['amount'] as num).toDouble()) / _transactions.length).toStringAsFixed(0)}',
+                  ),
                   const SizedBox(width: AppDimensions.spacingMd),
-                  _EarningStat(label: 'Rating', value: '4.8 ⭐'),
+                  const _EarningStat(label: 'Rating', value: 'See profile'),
                 ],
               ),
             ),
@@ -269,13 +356,30 @@ class _DriverEarningsPageState extends State<DriverEarningsPage>
           SliverList(
             delegate: SliverChildBuilderDelegate(
               (_, i) {
+                if (_loading)
+                  return const Padding(
+                    padding: EdgeInsets.all(24),
+                    child: Center(child: CircularProgressIndicator()),
+                  );
+                if (_transactions.isEmpty)
+                  return const Padding(
+                    padding: EdgeInsets.all(24),
+                    child: Center(
+                      child: Text(
+                        'Completed trips will appear here.',
+                        style: TextStyle(color: Colors.white70),
+                      ),
+                    ),
+                  );
                 final tx = _transactions[i];
                 return _TransactionTile(tx: tx)
                     .animate(delay: Duration(milliseconds: i * 80))
                     .fadeIn()
                     .slideX(begin: 0.1, end: 0);
               },
-              childCount: _transactions.length,
+              childCount: _loading || _transactions.isEmpty
+                  ? 1
+                  : _transactions.length,
             ),
           ),
 
@@ -323,12 +427,18 @@ class _EarningStat extends StatelessWidget {
         ),
         child: Column(
           children: [
-            Text(value,
-                style: AppTextStyles.titleLarge.copyWith(
-                    color: AppColors.primary, fontWeight: FontWeight.w700)),
+            Text(
+              value,
+              style: AppTextStyles.titleLarge.copyWith(
+                color: AppColors.primary,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
             const SizedBox(height: 4),
-            Text(label,
-                style: AppTextStyles.labelSmall.copyWith(color: Colors.white54)),
+            Text(
+              label,
+              style: AppTextStyles.labelSmall.copyWith(color: Colors.white54),
+            ),
           ],
         ),
       ),
@@ -344,7 +454,11 @@ class _TransactionTile extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       margin: const EdgeInsets.fromLTRB(
-          AppDimensions.spacingXl, 0, AppDimensions.spacingXl, AppDimensions.spacingMd),
+        AppDimensions.spacingXl,
+        0,
+        AppDimensions.spacingXl,
+        AppDimensions.spacingMd,
+      ),
       padding: const EdgeInsets.all(AppDimensions.spacingLg),
       decoration: BoxDecoration(
         color: const Color(0xFF1E2028),
@@ -359,21 +473,29 @@ class _TransactionTile extends StatelessWidget {
               color: AppColors.primary.withValues(alpha: 0.15),
               shape: BoxShape.circle,
             ),
-            child: const Icon(Icons.local_shipping_rounded,
-                color: AppColors.primary, size: 20),
+            child: const Icon(
+              Icons.local_shipping_rounded,
+              color: AppColors.primary,
+              size: 20,
+            ),
           ),
           const SizedBox(width: 12),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('${tx['from']} → ${tx['to']}',
-                    style: AppTextStyles.bodyMedium.copyWith(color: Colors.white),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis),
-                Text('${tx['id']} · ${tx['time']}',
-                    style: AppTextStyles.bodySmall
-                        .copyWith(color: Colors.white54)),
+                Text(
+                  '${tx['from']} → ${tx['to']}',
+                  style: AppTextStyles.bodyMedium.copyWith(color: Colors.white),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                Text(
+                  '${tx['id']} · ${tx['time']}',
+                  style: AppTextStyles.bodySmall.copyWith(
+                    color: Colors.white54,
+                  ),
+                ),
               ],
             ),
           ),
@@ -395,10 +517,8 @@ class _TabDelegate extends SliverPersistentHeaderDelegate {
   _TabDelegate(this.tabBar);
 
   @override
-  Widget build(_, _, _) => Container(
-        color: const Color(0xFF14161A),
-        child: tabBar,
-      );
+  Widget build(_, _, _) =>
+      Container(color: const Color(0xFF14161A), child: tabBar);
 
   @override
   double get maxExtent => tabBar.preferredSize.height;

@@ -19,12 +19,12 @@ class ChatMessage {
   final Map<String, String> translation;
   final DateTime createdAt;
 
-  factory ChatMessage.fromDoc(DocumentSnapshot<Map<String, dynamic>> doc) {
+  factory ChatMessage.fromDoc(DocumentSnapshot<Map<String, dynamic>> doc, String bookingId) {
     final data = doc.data() ?? <String, dynamic>{};
     final rawTranslation = data['translation'];
     return ChatMessage(
       id: doc.id,
-      bookingId: data['bookingId'] as String? ?? '',
+      bookingId: bookingId,
       senderId: data['senderId'] as String? ?? '',
       senderRole: data['senderRole'] as String? ?? 'customer',
       text: data['text'] as String? ?? '',
@@ -48,15 +48,14 @@ class ChatService {
 
   final FirebaseFirestore _firestore;
 
-  static const String collectionName = 'chatMessages';
+  static String collectionName(String bookingId) => 'bookings/$bookingId/chatMessages';
 
   Stream<List<ChatMessage>> messages(String bookingId) {
     return _firestore
-        .collection(collectionName)
-        .where('bookingId', isEqualTo: bookingId)
+        .collection(collectionName(bookingId))
         .snapshots()
         .map((snapshot) {
-          final items = snapshot.docs.map(ChatMessage.fromDoc).toList();
+          final items = snapshot.docs.map((doc) => ChatMessage.fromDoc(doc, bookingId)).toList();
           items.sort((a, b) => a.createdAt.compareTo(b.createdAt));
           return items;
         });
@@ -70,8 +69,7 @@ class ChatService {
   }) async {
     final trimmed = text.trim();
     if (trimmed.isEmpty) return;
-    await _firestore.collection(collectionName).add({
-      'bookingId': bookingId,
+    await _firestore.collection(collectionName(bookingId)).add({
       'senderId': senderId,
       'senderRole': senderRole,
       'text': trimmed,

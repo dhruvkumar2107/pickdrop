@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
 import '../../../../../core/constants/colors.dart';
 import '../../../../../core/constants/dimensions.dart';
@@ -18,48 +20,58 @@ class _DriverTripHistoryPageState extends State<DriverTripHistoryPage> {
   static const List<String> _filters = ['All', 'Today', 'This Week'];
   int _selectedFilter = 0;
 
-  static final List<_HistoryTrip> _trips = [
-    _HistoryTrip(
-      id: 'PD1004',
-      customer: 'Ananya Rao',
-      pickup: '55 Electronic City Phase 1',
-      drop: '9 HSR Layout Sector 2',
-      fare: 520,
-      commission: 78,
-      dateTime: DateTime(2026, 10, 6, 11, 45),
-      status: 'DELIVERED',
-    ),
-    _HistoryTrip(
-      id: 'PD1007',
-      customer: 'Karthik Iyer',
-      pickup: '12 Jayanagar 4th Block',
-      drop: '88 BTM Layout 2nd Stage',
-      fare: 199,
-      commission: 30,
-      dateTime: DateTime(2026, 10, 6, 9, 15),
-      status: 'DELIVERED',
-    ),
-    _HistoryTrip(
-      id: 'PD1008',
-      customer: 'Priya Nair',
-      pickup: '789 Indiranagar',
-      drop: '321 Whitefield',
-      fare: 450,
-      commission: 68,
-      dateTime: DateTime(2026, 10, 5, 18, 30),
-      status: 'DELIVERED',
-    ),
-    _HistoryTrip(
-      id: 'PD1009',
-      customer: 'Rohit Sharma',
-      pickup: '15 Yeshwanthpur',
-      drop: '63 Hebbal Flyover',
-      fare: 275,
-      commission: 0,
-      dateTime: DateTime(2026, 10, 5, 10, 0),
-      status: 'CANCELLED',
-    ),
-  ];
+  List<_HistoryTrip> _trips = [];
+  double _ledgerEarnings = 0;
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadTrips();
+  }
+
+  Future<void> _loadTrips() async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) {
+      setState(() => _loading = false);
+      return;
+    }
+    try {
+      final db = FirebaseFirestore.instance;
+      final results = await Future.wait([
+        db.collection('bookings').where('driverId', isEqualTo: uid).get(),
+        db.collection('driverLedger').where('driverId', isEqualTo: uid).get(),
+      ]);
+      final ledger = {for (final d in results[1].docs) d.id: d.data()};
+      final trips = results[0].docs.map((doc) {
+        final data = doc.data();
+        final route = ledger[doc.id];
+        final created = data['createdAt'];
+        return _HistoryTrip(
+          id: doc.id,
+          customer:
+              'Delivery ${doc.id.substring(0, doc.id.length > 8 ? 8 : doc.id.length)}',
+          pickup: (data['pickup']?['address'] ?? 'Pickup').toString(),
+          drop: (data['drop']?['address'] ?? 'Destination').toString(),
+          fare: (data['fareBreakdown']?['total'] as num? ?? 0).toDouble(),
+          commission: (route?['commission'] as num? ?? 0).toDouble(),
+          dateTime: created is Timestamp ? created.toDate() : DateTime.now(),
+          status: (data['status'] ?? 'UNKNOWN').toString(),
+        );
+      }).toList()..sort((a, b) => b.dateTime.compareTo(a.dateTime));
+      if (!mounted) return;
+      setState(() {
+        _trips = trips;
+        _ledgerEarnings = results[1].docs.fold<double>(
+          0,
+          (sum, d) => sum + ((d.data()['net'] as num?)?.toDouble() ?? 0),
+        );
+        _loading = false;
+      });
+    } catch (_) {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
 
   String _formatDate(DateTime date) {
     final hh = date.hour.toString().padLeft(2, '0');
@@ -70,8 +82,7 @@ class _DriverTripHistoryPageState extends State<DriverTripHistoryPage> {
   @override
   Widget build(BuildContext context) {
     final completed = _trips.where((t) => t.status != 'CANCELLED').toList();
-    final totalEarned =
-        completed.fold<double>(0, (sum, t) => sum + (t.fare - t.commission));
+    final totalEarned = _ledgerEarnings;
 
     return Scaffold(
       backgroundColor: AppColors.surface,
@@ -105,13 +116,15 @@ class _DriverTripHistoryPageState extends State<DriverTripHistoryPage> {
                     children: [
                       Text(
                         'Total Earned',
-                        style: AppTextStyles.labelMedium
-                            .copyWith(color: Colors.white70),
+                        style: AppTextStyles.labelMedium.copyWith(
+                          color: Colors.white70,
+                        ),
                       ),
                       Text(
                         '₹${totalEarned.toStringAsFixed(0)}',
-                        style: AppTextStyles.priceLarge
-                            .copyWith(color: Colors.white),
+                        style: AppTextStyles.priceLarge.copyWith(
+                          color: Colors.white,
+                        ),
                       ),
                     ],
                   ),
@@ -121,13 +134,15 @@ class _DriverTripHistoryPageState extends State<DriverTripHistoryPage> {
                   children: [
                     Text(
                       '${completed.length} trips',
-                      style: AppTextStyles.labelMedium
-                          .copyWith(color: Colors.white70),
+                      style: AppTextStyles.labelMedium.copyWith(
+                        color: Colors.white70,
+                      ),
                     ),
                     Text(
                       '${_trips.length} total',
-                      style: AppTextStyles.titleSmall
-                          .copyWith(color: Colors.white),
+                      style: AppTextStyles.titleSmall.copyWith(
+                        color: Colors.white,
+                      ),
                     ),
                   ],
                 ),
@@ -136,12 +151,15 @@ class _DriverTripHistoryPageState extends State<DriverTripHistoryPage> {
           ),
           Padding(
             padding: const EdgeInsets.symmetric(
-                horizontal: AppDimensions.spacingXl),
+              horizontal: AppDimensions.spacingXl,
+            ),
             child: Row(
               children: List.generate(_filters.length, (i) {
                 final selected = _selectedFilter == i;
                 return Padding(
-                  padding: const EdgeInsets.only(right: AppDimensions.spacingSm),
+                  padding: const EdgeInsets.only(
+                    right: AppDimensions.spacingSm,
+                  ),
                   child: ChoiceChip(
                     label: Text(_filters[i]),
                     selected: selected,
@@ -159,7 +177,9 @@ class _DriverTripHistoryPageState extends State<DriverTripHistoryPage> {
           ),
           const SizedBox(height: AppDimensions.spacingSm),
           Expanded(
-            child: _trips.isEmpty
+            child: _loading
+                ? const Center(child: CircularProgressIndicator())
+                : _trips.isEmpty
                 ? const EmptyState(
                     icon: Icons.history_rounded,
                     title: 'No trips yet',
@@ -172,63 +192,77 @@ class _DriverTripHistoryPageState extends State<DriverTripHistoryPage> {
                       final t = _trips[i];
                       final net = t.fare - t.commission;
                       return Container(
-                        margin:
-                            const EdgeInsets.only(bottom: AppDimensions.spacingMd),
-                        padding: const EdgeInsets.all(AppDimensions.spacingLg),
-                        decoration: BoxDecoration(
-                          color: Colors.white,
-                          borderRadius:
-                              BorderRadius.circular(AppDimensions.radiusMd),
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.black.withValues(alpha: 0.05),
-                              blurRadius: 10,
-                              offset: const Offset(0, 2),
+                            margin: const EdgeInsets.only(
+                              bottom: AppDimensions.spacingMd,
                             ),
-                          ],
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              children: [
-                                Expanded(
-                                  child: Text(t.customer,
-                                      style: AppTextStyles.titleSmall),
+                            padding: const EdgeInsets.all(
+                              AppDimensions.spacingLg,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(
+                                AppDimensions.radiusMd,
+                              ),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.black.withValues(alpha: 0.05),
+                                  blurRadius: 10,
+                                  offset: const Offset(0, 2),
                                 ),
-                                StatusChip.fromStatus(t.status, dense: true),
                               ],
                             ),
-                            const SizedBox(height: AppDimensions.spacingXs),
-                            Text(
-                              '${t.pickup}  →  ${t.drop}',
-                              style: AppTextStyles.bodySmall
-                                  .copyWith(color: AppColors.onSurfaceVariant),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                            const SizedBox(height: AppDimensions.spacingSm),
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Text(_formatDate(t.dateTime),
-                                    style: AppTextStyles.labelSmall
-                                        .copyWith(color: AppColors.onSurfaceVariant)),
+                                Row(
+                                  children: [
+                                    Expanded(
+                                      child: Text(
+                                        t.customer,
+                                        style: AppTextStyles.titleSmall,
+                                      ),
+                                    ),
+                                    StatusChip.fromStatus(
+                                      t.status,
+                                      dense: true,
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: AppDimensions.spacingXs),
                                 Text(
-                                  t.status == 'CANCELLED'
-                                      ? '₹0'
-                                      : '₹${net.toStringAsFixed(0)}',
-                                  style: AppTextStyles.titleSmall.copyWith(
-                                    color: t.status == 'CANCELLED'
-                                        ? AppColors.onSurfaceVariant
-                                        : AppColors.primary,
+                                  '${t.pickup}  →  ${t.drop}',
+                                  style: AppTextStyles.bodySmall.copyWith(
+                                    color: AppColors.onSurfaceVariant,
                                   ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                                const SizedBox(height: AppDimensions.spacingSm),
+                                Row(
+                                  mainAxisAlignment:
+                                      MainAxisAlignment.spaceBetween,
+                                  children: [
+                                    Text(
+                                      _formatDate(t.dateTime),
+                                      style: AppTextStyles.labelSmall.copyWith(
+                                        color: AppColors.onSurfaceVariant,
+                                      ),
+                                    ),
+                                    Text(
+                                      t.status == 'CANCELLED'
+                                          ? '₹0'
+                                          : '₹${net.toStringAsFixed(0)}',
+                                      style: AppTextStyles.titleSmall.copyWith(
+                                        color: t.status == 'CANCELLED'
+                                            ? AppColors.onSurfaceVariant
+                                            : AppColors.primary,
+                                      ),
+                                    ),
+                                  ],
                                 ),
                               ],
                             ),
-                          ],
-                        ),
-                      )
+                          )
                           .animate(delay: Duration(milliseconds: i * 70))
                           .fadeIn()
                           .slideY(begin: 0.1, end: 0);

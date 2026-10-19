@@ -18,7 +18,7 @@ import '../../../../../../core/widgets/gradient_button.dart';
 import '../../../../../../core/widgets/status_chip.dart';
 import '../../../../common/matching/services/driver_reliability_service.dart';
 import '../../../shared/services/driver_commission_service.dart';
-import '../../../shared/services/offline_action_queue.dart';
+import '../../../../customer/booking/data/datasources/booking_remote_datasource.dart';
 
 /// Readable foreground colour for a given accent (adapts to light/dark themes).
 Color _onAccent(Color accent) =>
@@ -28,7 +28,9 @@ Color _onAccent(Color accent) =>
 Color _accentEnd(Color accent) => Color.lerp(accent, Colors.black, 0.32)!;
 
 class IncomingRequestPage extends StatefulWidget {
-  const IncomingRequestPage({super.key});
+  const IncomingRequestPage({super.key, required this.bookingId});
+
+  final String bookingId;
 
   @override
   State<IncomingRequestPage> createState() => _IncomingRequestPageState();
@@ -36,27 +38,26 @@ class IncomingRequestPage extends StatefulWidget {
 
 class _IncomingRequestPageState extends State<IncomingRequestPage> {
   static const int _totalSeconds = AppConstants.defaultOfferTimeoutSeconds;
-  static const String _pickup = 'Phoenix Marketcity, Viman Nagar, Pune';
-  static const String _drop = 'Blueridge Phase 2, Hinjewadi, Pune';
-  static const String _goods = '3 boxes • Glass appliances';
-  static const String _customerNote = 'Please call when you reach the pickup gate.';
-  static const double _distanceKm = 3.2;
-  static const int _etaMinutes = 12;
-  static const double _fare = 180;
-  static const double _tip = 40;
-  static const double _baseFare = 120;
-  static const double _distanceFare = 60;
-  static const double _pickupKm = 1.4;
-  static const String _bookingId = 'PD1051';
-  static const int _completedTrips = 8;
+  late final String _bookingId = widget.bookingId;
+  String _pickup = 'Loading pickup…';
+  String _drop = 'Loading destination…';
+  String _goods = '';
+  String _customerNote = '';
+  double _distanceKm = 0;
+  int _etaMinutes = 0;
+  double _fare = 0;
+  final double _tip = 0;
+  double _baseFare = 0;
+  double _distanceFare = 0;
+  double _pickupKm = 0;
+  final int _completedTrips = 0;
 
   int _secondsLeft = AppConstants.defaultOfferTimeoutSeconds;
   bool _isExpired = false;
   Timer? _timer;
+  StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _offerSub;
   late Map<String, dynamic> _breakdown;
   DriverReliabilityModel? _reliability;
-
-  double get _gross => (_breakdown['gross'] as num?)?.toDouble() ?? 0;
 
   double get _commission => (_breakdown['commission'] as num?)?.toDouble() ?? 0;
 
@@ -74,13 +75,13 @@ class _IncomingRequestPageState extends State<IncomingRequestPage> {
       completedTrips: _completedTrips,
       tip: _tip,
     );
-    _timer = Timer.periodic(const Duration(seconds: 1), _onTick);
     _bootstrap();
   }
 
   @override
   void dispose() {
     _timer?.cancel();
+    _offerSub?.cancel();
     super.dispose();
   }
 
@@ -106,6 +107,15 @@ class _IncomingRequestPageState extends State<IncomingRequestPage> {
   }
 
   Future<void> _bootstrap() async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+    _offerSub = FirebaseFirestore.instance
+        .collection('driverOffers')
+        .doc('${_bookingId}_$uid')
+        .snapshots()
+        .listen(_onOfferSnapshot, onError: (_) {
+          if (mounted) AppToast.error(context, 'Could not load this driver request.');
+        });
     await _loadReliability();
     await DriverCommissionService.loadConfig();
     if (!mounted) return;
@@ -116,6 +126,51 @@ class _IncomingRequestPageState extends State<IncomingRequestPage> {
         tip: _tip,
       );
     });
+  }
+
+  void _onOfferSnapshot(DocumentSnapshot<Map<String, dynamic>> snapshot) {
+    final data = snapshot.data();
+    if (data == null || !mounted) return;
+    if (data['status'] != 'PENDING') {
+      if (data['status'] == 'ACCEPTED') return;
+      _timer?.cancel();
+      AppToast.info(context, 'This request is no longer available.');
+      context.go(RouteNames.driverHome);
+      return;
+    }
+    final fare = data['fareBreakdown'];
+    final pickup = data['pickup'];
+    final drop = data['drop'];
+    final expiresAt = data['expiresAt'];
+    final seconds = expiresAt is Timestamp
+        ? expiresAt.toDate().difference(DateTime.now()).inSeconds.clamp(0, _totalSeconds)
+        : _totalSeconds;
+    setState(() {
+      _pickup = data['pickupAddress'] as String? ?? '';
+      _drop = data['dropAddress'] as String? ?? '';
+      _goods = data['goodsType'] as String? ?? '';
+      _customerNote = data['notes'] as String? ?? '';
+      _distanceKm = (data['distanceKm'] as num?)?.toDouble() ?? 0;
+      _pickupKm = (data['distanceKm'] as num?)?.toDouble() ?? 0;
+      if (fare is Map) {
+        _fare = (fare['total'] as num?)?.toDouble() ?? 0;
+        _baseFare = (fare['baseFare'] as num?)?.toDouble() ?? 0;
+        _distanceFare = (fare['distanceFare'] as num?)?.toDouble() ?? 0;
+      }
+      _breakdown = DriverCommissionService.breakdown(
+        fare: _fare,
+        completedTrips: _completedTrips,
+        tip: _tip,
+      );
+      _secondsLeft = seconds;
+      _isExpired = seconds <= 0;
+    });
+    if (_timer == null && seconds > 0) {
+      _timer = Timer.periodic(const Duration(seconds: 1), _onTick);
+    }
+    if (pickup is Map && drop is Map) {
+      _etaMinutes = (_distanceKm / 25 * 60).ceil();
+    }
   }
 
   Future<void> _loadReliability() async {
@@ -142,30 +197,26 @@ class _IncomingRequestPageState extends State<IncomingRequestPage> {
   Future<void> _accept() async {
     if (_isExpired) return;
     _timer?.cancel();
-    final uid = FirebaseAuth.instance.currentUser?.uid;
-    await OfflineActionQueue.enqueue(
-      OfflineActionQueue.acceptTrip,
-      <String, dynamic>{
-        'bookingId': _bookingId,
-        'driverId': uid,
-        'pickup': _pickup,
-        'drop': _drop,
-        'gross': _gross,
-        'tip': _tip,
-      },
-    );
+    try {
+      await BookingRemoteDataSource().acceptOffer(_bookingId);
+    } catch (error) {
+      if (mounted) AppToast.error(context, 'Could not accept this delivery. It may have been taken.');
+      return;
+    }
     if (!mounted) return;
-    unawaited(
-      OfflineActionQueue.flush(FirebaseFirestore.instance),
-    );
-    AppToast.success(context, 'Trip accepted — head to the pickup point');
-    context.go(RouteNames.driverHome);
+    AppToast.success(context, 'Delivery accepted — head to the pickup point');
+    context.go('${RouteNames.activeTrip}?bookingId=${Uri.encodeComponent(_bookingId)}');
   }
 
   void _decline() {
     _timer?.cancel();
-    AppToast.info(context, 'Request declined');
-    context.go(RouteNames.driverHome);
+    BookingRemoteDataSource().rejectOffer(_bookingId).then((_) {
+      if (!mounted) return;
+      AppToast.info(context, 'Request declined');
+      context.go(RouteNames.driverHome);
+    }).catchError((Object _) {
+      if (mounted) AppToast.error(context, 'Could not decline this request.');
+    });
   }
 
   @override

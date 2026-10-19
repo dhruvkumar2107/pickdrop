@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+
 import '../../../../../../core/constants/colors.dart';
 import '../../../../../../core/constants/dimensions.dart';
 import '../../../../../../core/theme/text_styles.dart';
@@ -16,7 +17,8 @@ class AntiExtraCashSheet extends StatefulWidget {
     required this.driverName,
   });
 
-  static Future<void> show(BuildContext context, {
+  static Future<void> show(
+    BuildContext context, {
     required String bookingId,
     required String driverName,
   }) {
@@ -24,10 +26,8 @@ class AntiExtraCashSheet extends StatefulWidget {
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (_) => AntiExtraCashSheet(
-        bookingId: bookingId,
-        driverName: driverName,
-      ),
+      builder: (_) =>
+          AntiExtraCashSheet(bookingId: bookingId, driverName: driverName),
     );
   }
 
@@ -60,7 +60,6 @@ class _AntiExtraCashSheetState extends State<AntiExtraCashSheet> {
       final ds = PriceLockRemoteDataSource();
       await ds.reportExtraCashRequested(
         bookingId: widget.bookingId,
-        driverId: 'driver_active',
         extraCashAmount: amount,
         reason: _reasonController.text.trim(),
       );
@@ -69,7 +68,7 @@ class _AntiExtraCashSheetState extends State<AntiExtraCashSheet> {
       Navigator.of(context).pop();
       AppToast.success(
         context,
-        'Report registered. ₹${amount.toStringAsFixed(0)} auto-refunded to wallet guarantee.',
+        'Report submitted for review. No automatic refund has been issued.',
       );
     } catch (e) {
       if (mounted) {
@@ -121,7 +120,11 @@ class _AntiExtraCashSheetState extends State<AntiExtraCashSheet> {
                   color: colors.errorLight,
                   shape: BoxShape.circle,
                 ),
-                child: Icon(Icons.shield_outlined, color: colors.error, size: 22),
+                child: Icon(
+                  Icons.shield_outlined,
+                  color: colors.error,
+                  size: 22,
+                ),
               ),
               const SizedBox(width: AppDimensions.spacingMd),
               Expanded(

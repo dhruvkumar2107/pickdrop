@@ -1,25 +1,29 @@
+import 'dart:async';
+
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../../../config/router/route_names.dart';
+import '../../../../customer/booking/data/datasources/booking_remote_datasource.dart';
 import '../../../../../core/constants/colors.dart';
 import '../../../../../core/constants/dimensions.dart';
 import '../../../../../core/theme/text_styles.dart';
 
 class ActiveTripPage extends StatefulWidget {
+  final String bookingId;
   final String pickupAddress;
   final String dropAddress;
   final String customerName;
-  final String otp;
 
   const ActiveTripPage({
     super.key,
+    required this.bookingId,
     this.pickupAddress = '12, MG Road, Bangalore',
     this.dropAddress = 'Whitefield, Bangalore',
-    this.customerName = 'Dhruv M',
-    this.otp = '4521',
+    this.customerName = 'Customer',
   });
 
   @override
@@ -28,6 +32,10 @@ class ActiveTripPage extends StatefulWidget {
 
 class _ActiveTripPageState extends State<ActiveTripPage> {
   int _step = 0; // 0=go to pickup, 1=picked up, 2=delivered
+  final TextEditingController _otpController = TextEditingController();
+  StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _bookingSub;
+  bool _isWorking = false;
+  List<Map<String, dynamic>> _intermediateStops = [];
 
   final List<_TripStep> _steps = [
     _TripStep(
@@ -53,22 +61,97 @@ class _ActiveTripPageState extends State<ActiveTripPage> {
     ),
   ];
 
-  void _showDriverRatingSheet(BuildContext context) {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (_) => _DriverRatingSheet(
-        customerName: widget.customerName,
-        onSubmit: (rating, review) {
-          Navigator.pop(context);
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Rating submitted: $rating stars')),
-          );
-          context.go(RouteNames.driverHome);
-        },
-      ),
-    );
+  @override
+  void initState() {
+    super.initState();
+    if (widget.bookingId.isNotEmpty) {
+      _bookingSub = FirebaseFirestore.instance
+          .collection('bookings')
+          .doc(widget.bookingId)
+          .snapshots()
+          .listen((snapshot) {
+            final data = snapshot.data();
+            if (!mounted || data == null) return;
+            final status = data['status'] as String? ?? '';
+            final stops = (data['intermediateStops'] as List<dynamic>? ?? [])
+                .whereType<Map>()
+                .map((item) => Map<String, dynamic>.from(item))
+                .toList();
+            setState(() {
+              _intermediateStops = stops;
+              if (status == 'PICKED_UP') _step = 2;
+            });
+            if (status == 'DELIVERED') {
+              context.go(RouteNames.driverHome);
+            } else if (status == 'CANCELLED' || status == 'NO_DRIVER_FOUND') {
+              context.go(RouteNames.driverHome);
+            }
+          });
+    }
+  }
+
+  @override
+  void dispose() {
+    _bookingSub?.cancel();
+    _otpController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _confirmAction() async {
+    if (_isWorking) return;
+    if (widget.bookingId.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('A valid delivery is required.')),
+      );
+      return;
+    }
+    if (_step == 0) {
+      setState(() => _step = 1);
+      return;
+    }
+    final otp = _otpController.text.trim();
+    if (otp.length != 4) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Enter the 4-digit code from the customer.'),
+        ),
+      );
+      return;
+    }
+    setState(() => _isWorking = true);
+    try {
+      if (_step == 1) {
+        await BookingRemoteDataSource().verifyPickupOtp(widget.bookingId, otp);
+      } else if (_nextStop != null) {
+        await BookingRemoteDataSource().verifyIntermediateStopOtp(
+          widget.bookingId,
+          (_nextStop!['sequence'] as num).toInt(),
+          otp,
+        );
+      } else {
+        await BookingRemoteDataSource().verifyDropOtp(widget.bookingId, otp);
+      }
+      _otpController.clear();
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'The code was rejected or this delivery has changed. Try again.',
+            ),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isWorking = false);
+    }
+  }
+
+  Map<String, dynamic>? get _nextStop {
+    for (final stop in _intermediateStops) {
+      if (stop['otpVerified'] != true) return stop;
+    }
+    return null;
   }
 
   @override
@@ -94,8 +177,9 @@ class _ActiveTripPageState extends State<ActiveTripPage> {
               padding: const EdgeInsets.all(AppDimensions.spacingLg),
               child: Container(
                 padding: const EdgeInsets.symmetric(
-                    horizontal: AppDimensions.spacingLg,
-                    vertical: AppDimensions.spacingMd),
+                  horizontal: AppDimensions.spacingLg,
+                  vertical: AppDimensions.spacingMd,
+                ),
                 decoration: BoxDecoration(
                   color: const Color(0xFF1E2028),
                   borderRadius: BorderRadius.circular(AppDimensions.radiusMd),
@@ -112,30 +196,41 @@ class _ActiveTripPageState extends State<ActiveTripPage> {
                       padding: const EdgeInsets.all(8),
                       decoration: BoxDecoration(
                         color: currentStep.color.withValues(alpha: 0.15),
-                        borderRadius:
-                            BorderRadius.circular(AppDimensions.radiusSm),
+                        borderRadius: BorderRadius.circular(
+                          AppDimensions.radiusSm,
+                        ),
                       ),
-                      child: Icon(currentStep.icon,
-                          color: currentStep.color, size: 20),
+                      child: Icon(
+                        currentStep.icon,
+                        color: currentStep.color,
+                        size: 20,
+                      ),
                     ),
                     const SizedBox(width: 12),
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(currentStep.label,
-                              style: AppTextStyles.titleLarge
-                                  .copyWith(color: Colors.white)),
-                          Text(currentStep.sublabel,
-                              style: AppTextStyles.bodySmall.copyWith(
-                                  color: Colors.white60)),
+                          Text(
+                            currentStep.label,
+                            style: AppTextStyles.titleLarge.copyWith(
+                              color: Colors.white,
+                            ),
+                          ),
+                          Text(
+                            currentStep.sublabel,
+                            style: AppTextStyles.bodySmall.copyWith(
+                              color: Colors.white60,
+                            ),
+                          ),
                         ],
                       ),
                     ),
                     Text(
                       '${_step + 1}/${_steps.length}',
-                      style: AppTextStyles.labelMedium
-                          .copyWith(color: Colors.white60),
+                      style: AppTextStyles.labelMedium.copyWith(
+                        color: Colors.white60,
+                      ),
                     ),
                   ],
                 ),
@@ -150,10 +245,11 @@ class _ActiveTripPageState extends State<ActiveTripPage> {
             right: 0,
             child: Container(
               padding: EdgeInsets.fromLTRB(
-                  AppDimensions.spacingXl,
-                  AppDimensions.spacingXl,
-                  AppDimensions.spacingXl,
-                  AppDimensions.spacingXl + safeBottom),
+                AppDimensions.spacingXl,
+                AppDimensions.spacingXl,
+                AppDimensions.spacingXl,
+                AppDimensions.spacingXl + safeBottom,
+              ),
               decoration: const BoxDecoration(
                 color: Color(0xFF1E2028),
                 borderRadius: BorderRadius.vertical(
@@ -170,8 +266,9 @@ class _ActiveTripPageState extends State<ActiveTripPage> {
                     margin: const EdgeInsets.only(bottom: 16),
                     decoration: BoxDecoration(
                       color: const Color(0xFF3D3D4A),
-                      borderRadius:
-                          BorderRadius.circular(AppDimensions.radiusFull),
+                      borderRadius: BorderRadius.circular(
+                        AppDimensions.radiusFull,
+                      ),
                     ),
                   ),
 
@@ -200,12 +297,18 @@ class _ActiveTripPageState extends State<ActiveTripPage> {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text(widget.customerName,
-                                style: AppTextStyles.titleLarge
-                                    .copyWith(color: Colors.white)),
-                            Text('Customer',
-                                style: AppTextStyles.bodySmall
-                                    .copyWith(color: Colors.white60)),
+                            Text(
+                              widget.customerName,
+                              style: AppTextStyles.titleLarge.copyWith(
+                                color: Colors.white,
+                              ),
+                            ),
+                            Text(
+                              'Customer',
+                              style: AppTextStyles.bodySmall.copyWith(
+                                color: Colors.white60,
+                              ),
+                            ),
                           ],
                         ),
                       ),
@@ -215,11 +318,15 @@ class _ActiveTripPageState extends State<ActiveTripPage> {
                         child: Container(
                           padding: const EdgeInsets.all(10),
                           decoration: BoxDecoration(
-                            color: const Color(0xFF16A34A).withValues(alpha: 0.15),
+                            color: const Color(0xFF16A34A)
+                                .withValues(alpha: 0.15),
                             shape: BoxShape.circle,
                           ),
-                          child: const Icon(Icons.call_rounded,
-                              color: Color(0xFF22C55E), size: 22),
+                          child: const Icon(
+                            Icons.call_rounded,
+                            color: Color(0xFF22C55E),
+                            size: 22,
+                          ),
                         ),
                       ),
                     ],
@@ -227,28 +334,42 @@ class _ActiveTripPageState extends State<ActiveTripPage> {
                   const SizedBox(height: AppDimensions.spacingLg),
 
                   // OTP (show on first step)
-                  if (_step == 0) ...[
+                  if (_step > 0) ...[
                     Container(
                       padding: const EdgeInsets.symmetric(
-                          horizontal: 16, vertical: 10),
+                        horizontal: 16,
+                        vertical: 10,
+                      ),
                       decoration: BoxDecoration(
                         color: AppColors.primary.withValues(alpha: 0.1),
-                        borderRadius:
-                            BorderRadius.circular(AppDimensions.radiusMd),
+                        borderRadius: BorderRadius.circular(
+                          AppDimensions.radiusMd,
+                        ),
                         border: Border.all(
-                            color: AppColors.primary.withValues(alpha: 0.3)),
+                          color: AppColors.primary.withValues(alpha: 0.3),
+                        ),
                       ),
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          const Icon(Icons.lock_rounded,
-                              color: AppColors.primary, size: 18),
+                          const Icon(
+                            Icons.lock_rounded,
+                            color: AppColors.primary,
+                            size: 18,
+                          ),
                           const SizedBox(width: 8),
-                          Text('Pickup OTP: ',
-                              style: AppTextStyles.bodyMedium
-                                  .copyWith(color: Colors.white70)),
                           Text(
-                            widget.otp,
+                            _step == 1
+                                ? 'Pickup code: '
+                                : _nextStop != null
+                                ? 'Stop ${_nextStop!['sequence']} code: '
+                                : 'Drop code: ',
+                            style: AppTextStyles.bodyMedium.copyWith(
+                              color: Colors.white70,
+                            ),
+                          ),
+                          Text(
+                            '',
                             style: AppTextStyles.titleLarge.copyWith(
                               color: AppColors.primary,
                               letterSpacing: 4,
@@ -258,21 +379,37 @@ class _ActiveTripPageState extends State<ActiveTripPage> {
                         ],
                       ),
                     ),
+                    const SizedBox(height: AppDimensions.spacingMd),
+                    TextField(
+                      controller: _otpController,
+                      keyboardType: TextInputType.number,
+                      maxLength: 4,
+                      textAlign: TextAlign.center,
+                      decoration: const InputDecoration(
+                        hintText: 'Enter 4-digit code',
+                        counterText: '',
+                      ),
+                    ),
+                    if (_step == 2 && _nextStop != null) ...[
+                      const SizedBox(height: AppDimensions.spacingSm),
+                      Text(
+                        'Intermediate stop ${_nextStop!['sequence']}: ${_nextStop!['address'] ?? 'Pinned stop'}',
+                        style: AppTextStyles.bodyMedium.copyWith(
+                          color: Colors.white70,
+                        ),
+                      ),
+                    ],
                     const SizedBox(height: AppDimensions.spacingLg),
                   ],
 
                   // Swipe / confirm button
                   _SwipeButton(
-                    label: currentStep.actionLabel,
+                    label: _step == 2 && _nextStop != null
+                        ? 'Verify stop ${_nextStop!['sequence']} delivery'
+                        : currentStep.actionLabel,
                     color: currentStep.color,
-                    onConfirm: () {
-                      HapticFeedback.heavyImpact();
-                      if (_step < _steps.length - 1) {
-                        setState(() => _step++);
-                      } else {
-                        _showDriverRatingSheet(context);
-                      }
-                    },
+                    isLoading: _isWorking,
+                    onConfirm: _confirmAction,
                   ),
                 ],
               ),
@@ -304,11 +441,13 @@ class _SwipeButton extends StatefulWidget {
   final String label;
   final Color color;
   final VoidCallback onConfirm;
+  final bool isLoading;
 
   const _SwipeButton({
     required this.label,
     required this.color,
     required this.onConfirm,
+    this.isLoading = false,
   });
 
   @override
@@ -323,241 +462,102 @@ class _SwipeButtonState extends State<_SwipeButton> {
 
   @override
   Widget build(BuildContext context) {
-    return LayoutBuilder(builder: (_, constraints) {
-      final trackWidth = constraints.maxWidth;
-      final maxDrag = trackWidth - _thumbSize - _padding * 2;
-      final progress = (_dragX / maxDrag).clamp(0.0, 1.0);
-
-      return GestureDetector(
-        onHorizontalDragUpdate: (d) {
-          setState(() {
-            _dragX = (_dragX + d.delta.dx).clamp(0, maxDrag);
-          });
-        },
-        onHorizontalDragEnd: (_) {
-          if (progress > 0.8) {
-            widget.onConfirm();
-            setState(() => _dragX = 0);
-          } else {
-            setState(() => _dragX = 0);
-          }
-        },
-        child: Container(
-          height: _buttonHeight,
-          decoration: BoxDecoration(
-            color: widget.color.withValues(alpha: 0.15),
-            borderRadius: BorderRadius.circular(_buttonHeight / 2),
-            border: Border.all(
-                color: widget.color.withValues(alpha: 0.3), width: 1.5),
-          ),
-          child: Stack(
-            children: [
-              // Fill
-              Positioned(
-                left: _padding,
-                top: _padding,
-                bottom: _padding,
-                width: _thumbSize + _dragX * 0.9,
-                child: Container(
-                  decoration: BoxDecoration(
-                    color: widget.color.withValues(alpha: 0.2),
-                    borderRadius: BorderRadius.circular(_buttonHeight / 2),
-                  ),
-                ),
-              ),
-              // Label
-              Center(
-                child: Opacity(
-                  opacity: (1 - progress * 1.5).clamp(0.0, 1.0),
-                  child: Text(
-                    'Swipe → ${widget.label}',
-                    style: AppTextStyles.labelLarge
-                        .copyWith(color: Colors.white70),
-                  ),
-                ),
-              ),
-              // Thumb
-              Positioned(
-                left: _padding + _dragX,
-                top: _padding,
-                bottom: _padding,
-                width: _thumbSize,
-                child: Container(
-                  decoration: BoxDecoration(
-                    color: widget.color,
-                    shape: BoxShape.circle,
-                    boxShadow: [
-                      BoxShadow(
-                        color: widget.color.withValues(alpha: 0.4),
-                        blurRadius: 8,
-                      ),
-                    ],
-                  ),
-                  child: const Icon(Icons.chevron_right_rounded,
-                      color: Colors.white, size: 28),
-                ),
-              ),
-            ],
-          ),
-        ),
-      );
-    });
-  }
-}
-
-class _DriverRatingSheet extends StatefulWidget {
-  final String customerName;
-  final void Function(int rating, String review) onSubmit;
-
-  const _DriverRatingSheet({
-    required this.customerName,
-    required this.onSubmit,
-  });
-
-  @override
-  State<_DriverRatingSheet> createState() => _DriverRatingSheetState();
-}
-
-class _DriverRatingSheetState extends State<_DriverRatingSheet> {
-  int _rating = 0;
-  final TextEditingController _reviewController = TextEditingController();
-
-  @override
-  void dispose() {
-    _reviewController.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: EdgeInsets.only(
-        bottom: MediaQuery.of(context).viewInsets.bottom,
-      ),
-      decoration: const BoxDecoration(
-        color: Color(0xFF1E2028),
-        borderRadius: BorderRadius.vertical(
-          top: Radius.circular(24),
-        ),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(24, 24, 24, 24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Center(
-              child: Container(
-                width: 40,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: const Color(0xFF3D3D4A),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-              ),
-            ),
-            const SizedBox(height: 24),
-            Text(
-              'Rate ${widget.customerName}',
-              style: const TextStyle(
-                fontFamily: 'Poppins',
-                fontSize: 22,
-                fontWeight: FontWeight.w700,
-                color: Colors.white,
-              ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'How was the pickup experience?',
-              style: TextStyle(
-                fontFamily: 'Poppins',
-                fontSize: 14,
-                color: Colors.white60,
-              ),
-            ),
-            const SizedBox(height: 24),
-            _buildStarPicker(context),
-            const SizedBox(height: 24),
-            TextField(
-              controller: _reviewController,
-              maxLines: 3,
-              minLines: 2,
-              style: const TextStyle(
-                fontFamily: 'Poppins',
-                color: Colors.white,
-              ),
-              decoration: InputDecoration(
-                hintText: 'Write a review (optional)',
-                hintStyle: TextStyle(color: Colors.white38),
-                filled: true,
-                fillColor: const Color(0xFF2D3038),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: BorderSide.none,
-                ),
-                contentPadding: const EdgeInsets.all(16),
-              ),
-            ),
-            const SizedBox(height: 24),
-            SizedBox(
-              width: double.infinity,
-              height: 52,
-              child: ElevatedButton(
-                onPressed: _rating == 0
-                    ? null
-                    : () => widget.onSubmit(_rating, _reviewController.text),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF22C55E),
-                  disabledBackgroundColor: Colors.white12,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                ),
-                child: const Text(
-                  'Submit Rating',
-                  style: TextStyle(
-                    fontFamily: 'Poppins',
-                    fontSize: 16,
-                    fontWeight: FontWeight.w600,
-                    color: Colors.white,
-                  ),
-                ),
-              ),
-            ),
-            const SizedBox(height: 16),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildStarPicker(BuildContext context) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: List.generate(5, (index) {
-        final selected = index < _rating;
+    return LayoutBuilder(
+      builder: (_, constraints) {
+        final trackWidth = constraints.maxWidth;
+        final maxDrag = trackWidth - _thumbSize - _padding * 2;
+        final progress = (_dragX / maxDrag).clamp(0.0, 1.0);
 
         return GestureDetector(
-          onTap: () => setState(() => _rating = index + 1),
-          behavior: HitTestBehavior.opaque,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 8),
-            child: Icon(
-              selected ? Icons.star_rounded : Icons.star_outline_rounded,
-              size: 44,
-              color: selected ? const Color(0xFFFBBF24) : Colors.white38,
-            )
-                .animate(delay: (index * 70).ms)
-                .fadeIn(duration: 300.ms)
-                .scale(
-                  begin: const Offset(0.5, 0.5),
-                  end: const Offset(1.0, 1.0),
-                  duration: 500.ms,
-                  curve: Curves.easeOutBack,
+          onHorizontalDragUpdate: (d) {
+            if (widget.isLoading) return;
+            setState(() {
+              _dragX = (_dragX + d.delta.dx).clamp(0, maxDrag);
+            });
+          },
+          onHorizontalDragEnd: (_) {
+            if (widget.isLoading) return;
+            if (progress > 0.8) {
+              widget.onConfirm();
+              setState(() => _dragX = 0);
+            } else {
+              setState(() => _dragX = 0);
+            }
+          },
+          child: Container(
+            height: _buttonHeight,
+            decoration: BoxDecoration(
+              color: widget.color.withValues(alpha: 0.15),
+              borderRadius: BorderRadius.circular(_buttonHeight / 2),
+              border: Border.all(
+                color: widget.color.withValues(alpha: 0.3),
+                width: 1.5,
+              ),
+            ),
+            child: Stack(
+              children: [
+                // Fill
+                Positioned(
+                  left: _padding,
+                  top: _padding,
+                  bottom: _padding,
+                  width: _thumbSize + _dragX * 0.9,
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: widget.color.withValues(alpha: 0.2),
+                      borderRadius: BorderRadius.circular(_buttonHeight / 2),
+                    ),
+                  ),
                 ),
+                // Label
+                Center(
+                  child: Opacity(
+                    opacity: (1 - progress * 1.5).clamp(0.0, 1.0),
+                    child: Text(
+                      'Swipe → ${widget.label}',
+                      style: AppTextStyles.labelLarge.copyWith(
+                        color: Colors.white70,
+                      ),
+                    ),
+                  ),
+                ),
+                // Thumb
+                Positioned(
+                  left: _padding + _dragX,
+                  top: _padding,
+                  bottom: _padding,
+                  width: _thumbSize,
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: widget.color,
+                      shape: BoxShape.circle,
+                      boxShadow: [
+                        BoxShadow(
+                          color: widget.color.withValues(alpha: 0.4),
+                          blurRadius: 8,
+                        ),
+                      ],
+                    ),
+                    child: widget.isLoading
+                        ? const Padding(
+                            padding: EdgeInsets.all(12),
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Colors.white,
+                            ),
+                          )
+                        : const Icon(
+                            Icons.chevron_right_rounded,
+                            color: Colors.white,
+                            size: 28,
+                          ),
+                  ),
+                ),
+              ],
+            ),
           ),
         );
-      }),
+      },
     );
   }
 }

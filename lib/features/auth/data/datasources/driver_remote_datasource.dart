@@ -1,6 +1,9 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 
+import '../../../../config/env/env_config.dart';
 import '../../../../core/utils/extensions.dart';
+import '../../../../shared/services/notification_service.dart';
 import '../models/user_model.dart';
 
 abstract class DriverRemoteDataSource {
@@ -17,6 +20,10 @@ abstract class DriverRemoteDataSource {
     required String aadhaarFrontUrl,
     required String aadhaarBackUrl,
     required String photoUrl,
+    String? licenseFrontUrl,
+    String? licenseBackUrl,
+    String? rcFrontUrl,
+    String? rcBackUrl,
   });
   Future<DriverModel?> getDriverProfile(String userId);
   Future<DriverModel> updateDriverProfile({
@@ -62,6 +69,10 @@ class DriverRemoteDataSourceImpl implements DriverRemoteDataSource {
     required String aadhaarFrontUrl,
     required String aadhaarBackUrl,
     required String photoUrl,
+    String? licenseFrontUrl,
+    String? licenseBackUrl,
+    String? rcFrontUrl,
+    String? rcBackUrl,
   }) async {
     final now = DateTime.now();
     final geohash = getGeohash(0, 0, precision: 7); // Will be updated when location is available
@@ -95,7 +106,24 @@ class DriverRemoteDataSourceImpl implements DriverRemoteDataSource {
       updatedAt: now,
     );
 
-    await _firestore.collection('drivers').doc(userId).set(driverModel.toJson());
+    final functions = FirebaseFunctions.instanceFor(region: EnvConfig.functionsRegion);
+    await functions.httpsCallable('submitDriverKyc').call({
+      'vehicleTypeId': vehicleTypeId,
+      'vehicleNumber': vehicleNumber,
+      'vehicleModel': vehicleModel ?? '',
+      'licenseNumber': licenseNumber,
+      'licenseExpiry': licenseExpiry.millisecondsSinceEpoch,
+      'licenseFrontUrl': licenseFrontUrl ?? '',
+      'licenseBackUrl': licenseBackUrl ?? '',
+      'rcNumber': rcNumber,
+      'rcExpiry': rcExpiry.millisecondsSinceEpoch,
+      'rcFrontUrl': rcFrontUrl ?? '',
+      'rcBackUrl': rcBackUrl ?? '',
+      'aadhaarFrontUrl': aadhaarFrontUrl,
+      'aadhaarBackUrl': aadhaarBackUrl,
+      'photoUrl': photoUrl,
+    });
+    await NotificationService.instance.syncCurrentToken();
     return driverModel;
   }
 

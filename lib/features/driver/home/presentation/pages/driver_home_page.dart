@@ -1,4 +1,7 @@
+import 'dart:async';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -10,7 +13,6 @@ import '../../../../../../core/constants/colors.dart';
 import '../../../../../../core/constants/strings.dart';
 import '../../../../../../core/widgets/app_toast.dart';
 import '../../../../../../core/widgets/common.dart';
-import '../../../shared/services/offline_action_queue.dart';
 import '../../../shared/widgets/commission_transparency_card.dart';
 import '../../../shared/widgets/sos_button.dart';
 import '../providers/driver_home_providers.dart';
@@ -30,57 +32,90 @@ class DriverHomePage extends ConsumerStatefulWidget {
 }
 
 class _DriverHomePageState extends ConsumerState<DriverHomePage> {
-  static const String _driverName = 'Rajesh Kumar';
-  static const String _vehicleLabel = 'Tata Ace • KA 01 AB 1234';
-  static const double _todayEarnings = 2840;
-  static const int _todayTrips = 12;
-  static const double _acceptanceRate = 94;
-  static const double _rating = 4.9;
-  static const double _weekEarnings = 17420;
-  static const double _monthEarnings = 62850;
-
-  final List<_DriverTrip> _recentTrips = [
-    _DriverTrip(
-      id: 'PD1048',
-      status: AppConstants.statusDelivered,
-      pickup: 'Phoenix Marketcity, Viman Nagar',
-      drop: 'Blueridge Phase 2, Hinjewadi',
-      fare: 320,
-      dateTime: DateTime(2026, 10, 6, 14, 20),
-      vehicleType: 'Pickup',
-      rating: 5,
-    ),
-    _DriverTrip(
-      id: 'PD1047',
-      status: AppConstants.statusDelivered,
-      pickup: 'Koregaon Park, Pune',
-      drop: 'Baner Road, Pune',
-      fare: 465,
-      dateTime: DateTime(2026, 10, 6, 11, 5),
-      vehicleType: 'Pickup',
-      rating: 4.8,
-    ),
-    _DriverTrip(
-      id: 'PD1046',
-      status: AppConstants.statusCancelled,
-      pickup: 'Shivaji Nagar, Pune',
-      drop: 'Aundh Gaon, Pune',
-      fare: 50,
-      dateTime: DateTime(2026, 10, 5, 18, 40),
-      vehicleType: 'Pickup',
-      rating: null,
-    ),
-  ];
-
-  void _showIncomingRequest() {
-    if (!mounted) return;
-    context.go(RouteNames.incomingRequest);
+  Map<String, dynamic> _driverData = const {};
+  String get _driverName => FirebaseAuth.instance.currentUser?.displayName?.trim().isNotEmpty == true
+      ? FirebaseAuth.instance.currentUser!.displayName!.trim()
+      : 'Driver';
+  String get _vehicleLabel {
+    final model = (_driverData['vehicleModel'] as String?)?.trim();
+    final number = (_driverData['vehicleNumber'] as String?)?.trim();
+    return [if (model != null && model.isNotEmpty) model, if (number != null && number.isNotEmpty) number]
+        .join(' • ');
   }
+  double get _totalEarnings => (_driverData['totalEarnings'] as num?)?.toDouble() ?? 0;
+  int get _totalTrips => (_driverData['totalTrips'] as num?)?.toInt() ?? 0;
+  double get _rating => (_driverData['rating'] as num?)?.toDouble() ?? 0;
+
+  final List<_DriverTrip> _recentTrips = [];
+  StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _offersSub;
+  StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _tripsSub;
+  StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _driverSub;
+  String? _shownOfferId;
 
   @override
   void initState() {
     super.initState();
-    OfflineActionQueue.refresh();
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid != null) {
+      _driverSub = FirebaseFirestore.instance.collection('drivers').doc(uid).snapshots().listen((snapshot) {
+        if (!mounted) return;
+        setState(() => _driverData = snapshot.data() ?? const {});
+      });
+      _tripsSub = FirebaseFirestore.instance
+          .collection('bookings')
+          .where('driverId', isEqualTo: uid)
+          .snapshots()
+          .listen((snapshot) {
+        if (!mounted) return;
+        final trips = snapshot.docs
+            .where((doc) => doc.data()['status'] == 'DELIVERED')
+            .map((doc) {
+          final data = doc.data();
+          final pickup = data['pickup'] as Map<String, dynamic>? ?? const {};
+          final drop = data['drop'] as Map<String, dynamic>? ?? const {};
+          final fare = data['fareBreakdown'] as Map<String, dynamic>? ?? const {};
+          final createdAt = data['createdAt'];
+          return _DriverTrip(
+            id: doc.id,
+            status: AppConstants.statusDelivered,
+            pickup: pickup['address'] as String? ?? 'Pickup location',
+            drop: drop['address'] as String? ?? 'Drop location',
+            fare: (fare['total'] as num?)?.toDouble() ?? 0,
+            dateTime: createdAt is Timestamp ? createdAt.toDate() : DateTime.now(),
+            vehicleType: data['vehicleTypeId'] as String? ?? 'Delivery',
+            rating: null,
+          );
+        }).toList()..sort((a, b) => b.dateTime.compareTo(a.dateTime));
+        setState(() => _recentTrips
+          ..clear()
+          ..addAll(trips.take(3)));
+      });
+      _offersSub = FirebaseFirestore.instance
+          .collection('driverOffers')
+          .where('driverId', isEqualTo: uid)
+          .where('status', isEqualTo: 'PENDING')
+          .snapshots()
+          .listen((snapshot) {
+            if (!mounted) return;
+            if (snapshot.docs.isEmpty) {
+              _shownOfferId = null;
+              return;
+            }
+            final offer = snapshot.docs.first;
+            final bookingId = offer.data()['bookingId'] as String?;
+            if (bookingId == null || bookingId == _shownOfferId) return;
+            _shownOfferId = bookingId;
+            context.go('${RouteNames.incomingRequest}?bookingId=${Uri.encodeComponent(bookingId)}');
+          });
+    }
+  }
+
+  @override
+  void dispose() {
+    _offersSub?.cancel();
+    _tripsSub?.cancel();
+    _driverSub?.cancel();
+    super.dispose();
   }
 
   @override
@@ -111,54 +146,10 @@ class _DriverHomePageState extends ConsumerState<DriverHomePage> {
                 DesignTokens.spacingLg,
                 0,
               ),
-              child: const _OfflineSyncBanner(),
-            ),
-          ),
-          SliverToBoxAdapter(
-            child: Padding(
-              padding: EdgeInsets.fromLTRB(
-                DesignTokens.spacingLg,
-                DesignTokens.spacingLg,
-                DesignTokens.spacingLg,
-                0,
-              ),
-              child: _buildReliabilityAndPayoutPanel(colors),
-            ),
-          ),
-          SliverToBoxAdapter(
-            child: Padding(
-              padding: EdgeInsets.fromLTRB(
-                DesignTokens.spacingLg,
-                DesignTokens.spacingMd,
-                DesignTokens.spacingLg,
-                0,
-              ),
               child: CommissionTransparencyCard(
-                gross: _recentTrips.first.fare,
-                completedTrips: _todayTrips,
+                gross: _totalEarnings,
+                completedTrips: _totalTrips,
               ),
-            ),
-          ),
-          SliverToBoxAdapter(
-            child: Padding(
-              padding: EdgeInsets.fromLTRB(
-                DesignTokens.spacingLg,
-                DesignTokens.spacingLg,
-                DesignTokens.spacingLg,
-                0,
-              ),
-              child: _buildNewRequestCard(colors),
-            ),
-          ),
-          SliverToBoxAdapter(
-            child: Padding(
-              padding: EdgeInsets.fromLTRB(
-                DesignTokens.spacingLg,
-                DesignTokens.spacingMd,
-                DesignTokens.spacingLg,
-                0,
-              ),
-              child: _buildAvailabilityCard(colors),
             ),
           ),
           SliverToBoxAdapter(
@@ -213,10 +204,15 @@ class _DriverHomePageState extends ConsumerState<DriverHomePage> {
               DesignTokens.spacingSm,
             ),
             sliver: SliverList.separated(
-              itemCount: _recentTrips.length,
+              itemCount: _recentTrips.isEmpty ? 1 : _recentTrips.length,
               separatorBuilder: (_, _) =>
                   const SizedBox(height: DesignTokens.spacingMd),
               itemBuilder: (context, index) {
+                if (_recentTrips.isEmpty) {
+                  return const PDCard(
+                    child: Text('Completed trips will appear here.'),
+                  );
+                }
                 final trip = _recentTrips[index];
                 return _DriverTripTile(trip: trip)
                     .animate()
@@ -417,8 +413,8 @@ class _DriverHomePageState extends ConsumerState<DriverHomePage> {
               child: _StatCard(
                 icon: Icons.account_balance_wallet_outlined,
                 color: colors.driverAccent,
-                value: '₹${_todayEarnings.toStringAsFixed(0)}',
-                label: AppStrings.todaysEarnings,
+                value: '₹${_totalEarnings.toStringAsFixed(0)}',
+                label: 'Total earnings',
               ),
             ),
             SizedBox(width: DesignTokens.spacingMd),
@@ -426,7 +422,7 @@ class _DriverHomePageState extends ConsumerState<DriverHomePage> {
               child: _StatCard(
                 icon: Icons.local_shipping_outlined,
                 color: colors.info,
-                value: '$_todayTrips',
+                value: '$_totalTrips',
                 label: AppStrings.totalTrips,
               ),
             ),
@@ -435,8 +431,8 @@ class _DriverHomePageState extends ConsumerState<DriverHomePage> {
               child: _StatCard(
                 icon: Icons.insights_outlined,
                 color: colors.warning,
-                value: '${_acceptanceRate.toStringAsFixed(0)}%',
-                label: 'Acceptance',
+                value: _rating > 0 ? _rating.toStringAsFixed(1) : '—',
+                label: 'Driver rating',
               ),
             ),
           ],
@@ -448,8 +444,8 @@ class _DriverHomePageState extends ConsumerState<DriverHomePage> {
               child: _StatCard(
                 icon: Icons.calendar_view_week_outlined,
                 color: colors.success,
-                value: '₹${_weekEarnings.toStringAsFixed(0)}',
-                label: 'This Week',
+                value: _driverData['isVerified'] == true ? 'Verified' : 'Pending',
+                label: 'Verification',
               ),
             ),
             SizedBox(width: DesignTokens.spacingMd),
@@ -457,8 +453,8 @@ class _DriverHomePageState extends ConsumerState<DriverHomePage> {
               child: _StatCard(
                 icon: Icons.calendar_month_outlined,
                 color: colors.primary,
-                value: '₹${_monthEarnings.toStringAsFixed(0)}',
-                label: 'This Month',
+                value: _driverData['isOnline'] == true ? 'Online' : 'Offline',
+                label: 'Availability',
               ),
             ),
             SizedBox(width: DesignTokens.spacingMd),
@@ -466,8 +462,8 @@ class _DriverHomePageState extends ConsumerState<DriverHomePage> {
               child: _StatCard(
                 icon: Icons.star_rounded,
                 color: colors.secondary,
-                value: _rating.toStringAsFixed(1),
-                label: 'Driver rating',
+                value: _vehicleLabel.isEmpty ? '—' : 'Set',
+                label: 'Vehicle',
               ),
             ),
           ],
@@ -476,283 +472,6 @@ class _DriverHomePageState extends ConsumerState<DriverHomePage> {
     )
         .animate()
         .fadeIn(duration: DesignTokens.durationNormal, delay: 150.ms)
-        .slideY(begin: 0.1, end: 0, duration: DesignTokens.durationNormal);
-  }
-
-  Widget _buildReliabilityAndPayoutPanel(AppColorsExtension colors) {
-    return Column(
-      children: [
-        PDCard(
-          variant: PDCardVariant.elevated,
-          padding: EdgeInsets.all(DesignTokens.spacingLg),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  PDCard(
-                    variant: PDCardVariant.glass,
-                    padding: EdgeInsets.all(DesignTokens.spacingSm),
-                    radius: DesignTokens.radiusMd,
-                    child: Icon(Icons.shield_rounded, color: colors.primary, size: DesignTokens.iconSm),
-                  ),
-                  SizedBox(width: DesignTokens.spacingSm),
-                  Expanded(
-                    child: Text(
-                      'Reliability & GPS check',
-                      style: TextStyle(
-                        fontFamily: DesignTokens.fontUI,
-                        fontSize: 15,
-                        fontWeight: FontWeight.w700,
-                        color: colors.onSurface,
-                      ),
-                    ),
-                  ),
-                  PDBadge(
-                    label: 'SAFE',
-                    variant: PDBadgeVariant.success,
-                    size: PDBadgeSize.sm,
-                  ),
-                ],
-              ),
-              SizedBox(height: DesignTokens.spacingMd),
-              Row(
-                children: [
-                  Expanded(
-                    child: _MiniMetric(label: 'Acceptance', value: '96%'),
-                  ),
-                  SizedBox(width: DesignTokens.spacingSm),
-                  Expanded(
-                    child: _MiniMetric(label: 'On-time', value: '98%'),
-                  ),
-                  SizedBox(width: DesignTokens.spacingSm),
-                  Expanded(
-                    child: _MiniMetric(label: 'GPS', value: '3 km'),
-                  ),
-                ],
-              ),
-              SizedBox(height: DesignTokens.spacingSm),
-              Text(
-                'Fake GPS is blocked, cancellation risk is low, and a priority match is kept for nearby accepted trips.',
-                style: TextStyle(
-                  fontFamily: DesignTokens.fontUI,
-                  fontSize: 12,
-                  fontWeight: FontWeight.w400,
-                  color: colors.onSurfaceVariant,
-                ),
-              ),
-            ],
-          ),
-        ),
-        SizedBox(height: DesignTokens.spacingMd),
-        PDCard(
-          variant: PDCardVariant.gradient,
-          padding: EdgeInsets.all(DesignTokens.spacingLg),
-          gradientColors: [colors.success.withValues(alpha: 0.12), colors.primary.withValues(alpha: 0.06)],
-          child: Row(
-            children: [
-              PDCard(
-                variant: PDCardVariant.glass,
-                padding: EdgeInsets.all(DesignTokens.spacingSm),
-                radius: DesignTokens.radiusMd,
-                child: Icon(Icons.account_balance_wallet_rounded, color: colors.success, size: DesignTokens.iconSm),
-              ),
-              SizedBox(width: DesignTokens.spacingSm),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Instant payout ready',
-                      style: TextStyle(
-                        fontFamily: DesignTokens.fontUI,
-                        fontSize: 15,
-                        fontWeight: FontWeight.w700,
-                        color: colors.onSurface,
-                      ),
-                    ),
-                    SizedBox(height: DesignTokens.spacingXxs),
-                    Text(
-                      '₹640 available • UPI anytime • Min ₹100',
-                      style: TextStyle(
-                        fontFamily: DesignTokens.fontUI,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w400,
-                        color: colors.onSurfaceVariant,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              PDButton(
-                text: 'Request payout',
-                variant: PDButtonVariant.ghost,
-                size: PDButtonSize.sm,
-                onPressed: () => AppToast.success(context, 'UPI payout request sent. Funds will arrive in 30 minutes.'),
-              ),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildNewRequestCard(AppColorsExtension colors) {
-    final accent = colors.driverAccent;
-    final onAccent = _onAccent(accent);
-
-    return PDCard(
-      variant: PDCardVariant.gradient,
-      gradientColors: [accent, _accentEnd(accent)],
-      padding: EdgeInsets.all(DesignTokens.spacingLg),
-      onTap: _showIncomingRequest,
-      showShadow: true,
-      boxShadow: [
-        BoxShadow(
-          color: accent.withValues(alpha: 0.35),
-          blurRadius: 20,
-          offset: const Offset(0, 8),
-        ),
-      ],
-      child: Row(
-        children: [
-          PDCard(
-            variant: PDCardVariant.glass,
-            padding: EdgeInsets.all(DesignTokens.spacingMd),
-            radius: DesignTokens.radiusMd,
-            child: Icon(
-              Icons.bolt_rounded,
-              size: DesignTokens.iconLg,
-              color: onAccent,
-            ),
-          ),
-          SizedBox(width: DesignTokens.spacingMd),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    _PulsingDot(color: onAccent, size: 8),
-                    SizedBox(width: DesignTokens.spacingSm),
-                    Text(
-                      'New delivery request nearby',
-                      style: TextStyle(
-                        fontFamily: DesignTokens.fontUI,
-                        fontSize: 15,
-                        fontWeight: FontWeight.w600,
-                        color: onAccent,
-                      ),
-                    ),
-                  ],
-                ),
-                SizedBox(height: DesignTokens.spacingXs),
-                Text(
-                  '3.2 km away • ₹485 + ₹40 tip • Offer ends in 30s',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontFamily: DesignTokens.fontUI,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w400,
-                    color: onAccent.withValues(alpha: 0.8),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          Icon(
-            Icons.chevron_right_rounded,
-            size: DesignTokens.iconLg,
-            color: onAccent,
-          ),
-        ],
-      ),
-    )
-        .animate()
-        .fadeIn(
-          duration: DesignTokens.durationNormal,
-          delay: 250.ms,
-        )
-        .slideY(begin: 0.1, end: 0, duration: DesignTokens.durationNormal);
-  }
-
-  Widget _buildAvailabilityCard(AppColorsExtension colors) {
-    final accent = colors.driverAccent;
-
-    return PDCard(
-      variant: PDCardVariant.elevated,
-      padding: EdgeInsets.all(DesignTokens.spacingLg),
-      showShadow: true,
-      child: Row(
-        children: [
-          SizedBox(
-            width: DesignTokens.avatarLg + DesignTokens.spacingMd,
-            height: DesignTokens.avatarLg + DesignTokens.spacingMd,
-            child: Stack(
-              alignment: Alignment.center,
-              children: [
-                _RadarRing(color: accent, delay: 0),
-                _RadarRing(color: accent, delay: 700),
-                PDCard(
-                  variant: PDCardVariant.gradient,
-                  gradientColors: [accent, _accentEnd(accent)],
-                  radius: DesignTokens.avatarMd / 2,
-                  child: Icon(
-                    Icons.navigation_rounded,
-                    size: DesignTokens.iconSm,
-                    color: _onAccent(accent),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          SizedBox(width: DesignTokens.spacingLg),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'High demand near you',
-                  style: TextStyle(
-                    fontFamily: DesignTokens.fontUI,
-                    fontSize: 15,
-                    fontWeight: FontWeight.w600,
-                    color: colors.onSurface,
-                  ),
-                ),
-                SizedBox(height: DesignTokens.spacingXs),
-                Text(
-                  '3 requests within 2 km • Surge 1.2x',
-                  style: TextStyle(
-                    fontFamily: DesignTokens.fontUI,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w400,
-                    color: colors.onSurfaceVariant,
-                  ),
-                ),
-                SizedBox(height: DesignTokens.spacingSm),
-                PDBadge(
-                  label: 'Zone active',
-                  variant: PDBadgeVariant.success,
-                  size: PDBadgeSize.sm,
-                ),
-              ],
-            ),
-          ),
-          Icon(
-            Icons.chevron_right_rounded,
-            size: DesignTokens.iconMd,
-            color: colors.onSurfaceVariant,
-          ),
-        ],
-      ),
-    )
-        .animate()
-        .fadeIn(
-          duration: DesignTokens.durationNormal,
-          delay: 350.ms,
-        )
         .slideY(begin: 0.1, end: 0, duration: DesignTokens.durationNormal);
   }
 
@@ -876,109 +595,30 @@ class _DriverHomePageState extends ConsumerState<DriverHomePage> {
   }
 }
 
-class _OfflineSyncBanner extends StatelessWidget {
-  const _OfflineSyncBanner();
+class _StatCard extends StatelessWidget {
+  const _StatCard({required this.icon, required this.color, required this.value, required this.label});
 
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-    return ValueListenableBuilder<int>(
-      valueListenable: OfflineActionQueue.pendingCountNotifier,
-      builder: (context, pending, _) {
-        final synced = pending == 0;
-        return PDCard(
-          variant: synced ? PDCardVariant.success : PDCardVariant.warning,
-          padding: EdgeInsets.symmetric(
-            horizontal: DesignTokens.spacingMd,
-            vertical: DesignTokens.spacingSm,
-          ),
-          child: Row(
-            children: [
-              Icon(
-                synced ? Icons.cloud_done_outlined : Icons.cloud_off_outlined,
-                size: DesignTokens.iconSm,
-                color: synced ? colors.success : colors.warning,
-              ),
-              SizedBox(width: DesignTokens.spacingSm),
-              Expanded(
-                child: Text(
-                  synced
-                      ? 'Offline queue clear — all updates synced'
-                      : '$pending update${pending == 1 ? '' : 's'} waiting to sync',
-                  style: TextStyle(
-                    fontFamily: DesignTokens.fontUI,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w500,
-                    color: synced ? colors.success : colors.warning,
-                  ),
-                ),
-              ),
-              if (!synced)
-                PDButton(
-                  text: 'Sync now',
-                  variant: PDButtonVariant.ghost,
-                  size: PDButtonSize.xs,
-                  onPressed: () async {
-                    final before = OfflineActionQueue.pendingCount;
-                    await OfflineActionQueue.flush(FirebaseFirestore.instance);
-                    if (!context.mounted) return;
-                    final after = OfflineActionQueue.pendingCount;
-                    if (after == 0) {
-                      AppToast.success(context, 'Offline updates synced');
-                    } else {
-                      AppToast.warning(
-                        context,
-                        '$after of $before updates still waiting — will retry when online',
-                      );
-                    }
-                  },
-                ),
-            ],
-          ),
-        );
-      },
-    );
-  }
-}
-
-class _MiniMetric extends StatelessWidget {
-  const _MiniMetric({required this.label, required this.value});
-
-  final String label;
+  final IconData icon;
+  final Color color;
   final String value;
+  final String label;
 
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-
     return PDCard(
       variant: PDCardVariant.filled,
-      padding: EdgeInsets.symmetric(
-        vertical: DesignTokens.spacingSm,
-        horizontal: DesignTokens.spacingXs,
-      ),
+      padding: EdgeInsets.all(DesignTokens.spacingMd),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            label,
-            style: TextStyle(
-              fontFamily: DesignTokens.fontUI,
-              fontSize: 11,
-              fontWeight: FontWeight.w500,
-              color: colors.onSurfaceVariant,
-            ),
-          ),
-          SizedBox(height: DesignTokens.spacingXxs),
-          Text(
-            value,
-            style: TextStyle(
-              fontFamily: DesignTokens.fontUI,
-              fontSize: 16,
-              fontWeight: FontWeight.w700,
-              color: colors.onSurface,
-            ),
-          ),
+          Icon(icon, color: color, size: DesignTokens.iconSm),
+          SizedBox(height: DesignTokens.spacingSm),
+          Text(value, style: TextStyle(fontFamily: DesignTokens.fontUI, fontSize: 16,
+              fontWeight: FontWeight.w700, color: colors.onSurface)),
+          Text(label, maxLines: 1, overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontFamily: DesignTokens.fontUI, fontSize: 10,
+                  fontWeight: FontWeight.w500, color: colors.onSurfaceVariant)),
         ],
       ),
     );
@@ -1014,16 +654,15 @@ class _SectionTitle extends StatelessWidget {
 }
 
 class _PulsingDot extends StatelessWidget {
-  const _PulsingDot({required this.color, this.size = 10});
+  const _PulsingDot({required this.color});
 
   final Color color;
-  final double size;
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      width: size,
-      height: size,
+      width: 10,
+      height: 10,
       decoration: BoxDecoration(
         color: color,
         shape: BoxShape.circle,
@@ -1043,96 +682,6 @@ class _PulsingDot extends StatelessWidget {
           curve: Curves.easeInOut,
         )
         .fade(begin: 1, end: 0.4, duration: 900.ms);
-  }
-}
-
-class _RadarRing extends StatelessWidget {
-  const _RadarRing({required this.color, required this.delay});
-
-  final Color color;
-  final int delay;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        border: Border.all(
-          color: color.withValues(alpha: 0.35),
-          width: 1.5,
-        ),
-      ),
-    )
-        .animate(onPlay: (controller) => controller.repeat())
-        .scale(
-          begin: const Offset(0.45, 0.45),
-          end: const Offset(1.0, 1.0),
-          duration: 1800.ms,
-          delay: delay.ms,
-          curve: Curves.easeOut,
-        )
-        .fade(begin: 0.9, end: 0, duration: 1800.ms, delay: delay.ms);
-  }
-}
-
-class _StatCard extends StatelessWidget {
-  const _StatCard({
-    required this.icon,
-    required this.color,
-    required this.value,
-    required this.label,
-  });
-
-  final IconData icon;
-  final Color color;
-  final String value;
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-
-    return PDCard(
-      variant: PDCardVariant.elevated,
-      padding: EdgeInsets.all(DesignTokens.spacingMd),
-      showShadow: true,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          PDCard(
-            variant: PDCardVariant.glass,
-            padding: EdgeInsets.all(DesignTokens.spacingSm),
-            radius: DesignTokens.radiusSm,
-            child: Icon(icon, size: DesignTokens.iconSm, color: color),
-          ),
-          SizedBox(height: DesignTokens.spacingSm),
-          Text(
-            value,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              fontFamily: DesignTokens.fontUI,
-              fontSize: 17,
-              fontWeight: FontWeight.w700,
-              letterSpacing: -0.25,
-              color: colors.onSurface,
-            ),
-          ),
-          SizedBox(height: DesignTokens.spacingXxs),
-          Text(
-            label,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              fontFamily: DesignTokens.fontUI,
-              fontSize: 11,
-              fontWeight: FontWeight.w400,
-              color: colors.onSurfaceVariant,
-            ),
-          ),
-        ],
-      ),
-    );
   }
 }
 

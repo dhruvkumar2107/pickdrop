@@ -1,3 +1,5 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -435,46 +437,7 @@ class _PickupDropSelectionPageState extends ConsumerState<PickupDropSelectionPag
           ),
           SizedBox(height: DesignTokens.spacingMd),
 
-          // Mock saved addresses for demo
-          _SavedLocationTile(
-            label: 'Home',
-            address: '123 MG Road, Bangalore',
-            icon: Icons.home,
-            color: colors.primary,
-            onTap: () {
-              setState(() {
-                if (isPickup) {
-                  _pickupLabel = 'Home';
-                  _pickupLat = 12.9716;
-                  _pickupLng = 77.5946;
-                } else {
-                  _dropLabel = 'Home';
-                  _dropLat = 12.9716;
-                  _dropLng = 77.5946;
-                }
-              });
-            },
-          ),
-          SizedBox(height: DesignTokens.spacingSm),
-          _SavedLocationTile(
-            label: 'Work',
-            address: '456 Koramangala, Bangalore',
-            icon: Icons.work_outline,
-            color: colors.info,
-            onTap: () {
-              setState(() {
-                if (isPickup) {
-                  _pickupLabel = 'Work';
-                  _pickupLat = 12.9352;
-                  _pickupLng = 77.6146;
-                } else {
-                  _dropLabel = 'Work';
-                  _dropLat = 12.9352;
-                  _dropLng = 77.6146;
-                }
-              });
-            },
-          ),
+          _savedLocations(isPickup, colors),
 
           // Swap button (only on drop step)
           if (!isPickup && _pickupLabel != null && _dropLabel != null) ...[
@@ -491,6 +454,61 @@ class _PickupDropSelectionPageState extends ConsumerState<PickupDropSelectionPag
       ),
     );
   }
+
+  Widget _savedLocations(bool isPickup, AppColorsExtension colors) {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return const Text('Sign in to use saved addresses.');
+    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+      stream: FirebaseFirestore.instance
+          .collection('savedAddresses')
+          .where('userId', isEqualTo: uid)
+          .snapshots(),
+      builder: (context, snapshot) {
+        if (snapshot.hasError) return const Text('Could not load saved addresses.');
+        if (!snapshot.hasData) return const LinearProgressIndicator();
+        if (snapshot.data!.docs.isEmpty) {
+          return TextButton.icon(
+            onPressed: () => context.push(RouteNames.savedAddresses),
+            icon: const Icon(Icons.add_location_alt_outlined),
+            label: const Text('Add a saved address'),
+          );
+        }
+        return Column(
+          children: snapshot.data!.docs.map((doc) {
+            final data = doc.data();
+            final type = (data['type'] ?? '').toString();
+            final label = (data['label'] ?? type).toString();
+            final latitude = (data['latitude'] as num?)?.toDouble();
+            final longitude = (data['longitude'] as num?)?.toDouble();
+            return Padding(
+              padding: EdgeInsets.only(bottom: DesignTokens.spacingSm),
+              child: _SavedLocationTile(
+                label: label,
+                address: (data['address'] ?? '').toString(),
+                icon: type == 'Home' ? Icons.home : type == 'Work' ? Icons.work_outline : Icons.location_on_outlined,
+                color: type == 'Work' ? colors.info : colors.primary,
+                onTap: latitude == null || longitude == null
+                    ? null
+                    : () {
+                        setState(() {
+                          if (isPickup) {
+                            _pickupLabel = label;
+                            _pickupLat = latitude;
+                            _pickupLng = longitude;
+                          } else {
+                            _dropLabel = label;
+                            _dropLat = latitude;
+                            _dropLng = longitude;
+                          }
+                        });
+                      },
+              ),
+            );
+          }).toList(),
+        );
+      },
+    );
+  }
 }
 
 class _SavedLocationTile extends StatelessWidget {
@@ -498,7 +516,7 @@ class _SavedLocationTile extends StatelessWidget {
   final String address;
   final IconData icon;
   final Color color;
-  final VoidCallback onTap;
+  final VoidCallback? onTap;
 
   const _SavedLocationTile({
     required this.label,

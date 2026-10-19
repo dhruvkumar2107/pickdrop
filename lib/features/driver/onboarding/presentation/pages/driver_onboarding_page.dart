@@ -5,12 +5,17 @@ import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_storage/firebase_storage.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 import '../../../../../../config/router/route_names.dart';
 import '../../../../../../core/constants/colors.dart';
 import '../../../../../../core/constants/strings.dart';
 import '../../../../../../core/widgets/app_toast.dart';
 import '../../../../../../core/widgets/common.dart';
+import '../../../../auth/data/datasources/driver_remote_datasource.dart';
+import '../../../../auth/data/models/user_model.dart';
 
 class DriverOnboardingPage extends ConsumerStatefulWidget {
   const DriverOnboardingPage({super.key});
@@ -27,6 +32,10 @@ class _DriverOnboardingPageState extends ConsumerState<DriverOnboardingPage> {
   String? _selectedVehicleTypeId;
   String _vehicleNumber = '';
   String _vehicleModel = '';
+  String _licenseNumber = '';
+  String _rcNumber = '';
+  DateTime? _licenseExpiry;
+  DateTime? _rcExpiry;
 
   XFile? _licenseFront;
   XFile? _licenseBack;
@@ -38,6 +47,8 @@ class _DriverOnboardingPageState extends ConsumerState<DriverOnboardingPage> {
 
   final ImagePicker _picker = ImagePicker();
   bool _isSubmitting = false;
+  String? _rejectionReason;
+  late final Future<List<VehicleTypeModel>> _vehicleTypesFuture;
 
   static const List<_OnboardingStep> _steps = [
     _OnboardingStep(
@@ -56,6 +67,27 @@ class _DriverOnboardingPageState extends ConsumerState<DriverOnboardingPage> {
       icon: Icons.description_outlined,
     ),
   ];
+
+  @override
+  void initState() {
+    super.initState();
+    _vehicleTypesFuture = DriverRemoteDataSourceImpl(FirebaseFirestore.instance).getVehicleTypes();
+    _loadKycReviewStatus();
+  }
+
+  Future<void> _loadKycReviewStatus() async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+    try {
+      final record = await FirebaseFirestore.instance.collection('driverPrivate').doc(uid).get();
+      final data = record.data();
+      if (mounted && data?['status'] == 'REJECTED') {
+        setState(() => _rejectionReason = (data?['reviewReason'] as String?)?.trim());
+      }
+    } catch (_) {
+      // A first-time application has no private KYC record yet.
+    }
+  }
 
   @override
   void dispose() {
@@ -107,6 +139,14 @@ class _DriverOnboardingPageState extends ConsumerState<DriverOnboardingPage> {
           AppToast.warning(context, 'Please upload your photo');
           return false;
         }
+        if (_licenseNumber.trim().isEmpty || _rcNumber.trim().isEmpty) {
+          AppToast.warning(context, 'Enter your license and RC numbers.');
+          return false;
+        }
+        if (_licenseExpiry == null || _rcExpiry == null) {
+          AppToast.warning(context, 'Select the expiry dates shown on your license and RC.');
+          return false;
+        }
         return true;
       default:
         return true;
@@ -128,6 +168,25 @@ class _DriverOnboardingPageState extends ConsumerState<DriverOnboardingPage> {
         AppToast.error(context, 'Failed to pick image: $e');
       }
     }
+  }
+
+  Future<void> _pickExpiryDate({required bool license}) async {
+    final now = DateTime.now();
+    final selected = await showDatePicker(
+      context: context,
+      initialDate: license ? (_licenseExpiry ?? DateTime(now.year + 1, now.month, now.day))
+          : (_rcExpiry ?? DateTime(now.year + 1, now.month, now.day)),
+      firstDate: now,
+      lastDate: DateTime(now.year + 20),
+    );
+    if (selected == null || !mounted) return;
+    setState(() {
+      if (license) {
+        _licenseExpiry = selected;
+      } else {
+        _rcExpiry = selected;
+      }
+    });
   }
 
   void _showImageSourceDialog(Function(XFile) onPicked) {
@@ -246,14 +305,53 @@ class _DriverOnboardingPageState extends ConsumerState<DriverOnboardingPage> {
 
   Future<void> _submitOnboarding() async {
     setState(() => _isSubmitting = true);
-
-    await Future.delayed(const Duration(seconds: 2));
-
-    if (!mounted) return;
-    setState(() => _isSubmitting = false);
-
-    AppToast.success(context, 'Onboarding submitted! Waiting for verification.');
-    context.go(RouteNames.driverHome);
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null || _selectedVehicleTypeId == null) {
+        throw StateError('Sign in and select a vehicle type before submitting.');
+      }
+      Future<String> upload(XFile? file, String name) async {
+        if (file == null) throw StateError('A required document is missing.');
+        final ref = FirebaseStorage.instance.ref('drivers/${user.uid}/$name');
+        await ref.putData(await file.readAsBytes(), SettableMetadata(contentType: file.mimeType ?? 'image/jpeg'));
+        return ref.getDownloadURL();
+      }
+      final urls = await Future.wait([
+        upload(_licenseFront, 'license_front.jpg'),
+        upload(_licenseBack, 'license_back.jpg'),
+        upload(_rcFront, 'rc_front.jpg'),
+        upload(_rcBack, 'rc_back.jpg'),
+        upload(_aadhaarFront, 'aadhaar_front.jpg'),
+        upload(_aadhaarBack, 'aadhaar_back.jpg'),
+        upload(_driverPhoto, 'profile.jpg'),
+      ]);
+      await DriverRemoteDataSourceImpl(FirebaseFirestore.instance).createDriverProfile(
+        userId: user.uid,
+        vehicleTypeId: _selectedVehicleTypeId!,
+        vehicleNumber: _vehicleNumber,
+        vehicleModel: _vehicleModel.trim().isEmpty ? null : _vehicleModel.trim(),
+        licenseNumber: _licenseNumber.trim(),
+        licenseExpiry: _licenseExpiry!,
+        rcNumber: _rcNumber.trim(),
+        rcExpiry: _rcExpiry!,
+        aadhaarNumber: '',
+        licenseFrontUrl: urls[0],
+        licenseBackUrl: urls[1],
+        rcFrontUrl: urls[2],
+        rcBackUrl: urls[3],
+        aadhaarFrontUrl: urls[4],
+        aadhaarBackUrl: urls[5],
+        photoUrl: urls[6],
+      );
+      if (!mounted) return;
+      AppToast.success(context, 'Documents submitted. Your profile is pending verification.');
+      context.go(RouteNames.driverHome);
+    } catch (error) {
+      if (!mounted) return;
+      AppToast.error(context, 'Could not submit driver documents: $error');
+    } finally {
+      if (mounted) setState(() => _isSubmitting = false);
+    }
   }
 
   @override
@@ -429,19 +527,43 @@ class _DriverOnboardingPageState extends ConsumerState<DriverOnboardingPage> {
             style: TokenTextStyles.bodyMedium(color: context.colors.onSurfaceVariant),
           ),
           SizedBox(height: DesignTokens.spacingXl),
-          ..._vehicleTypes.map((type) {
-            final isSelected = _selectedVehicleTypeId == type.id;
-            return Padding(
-              padding: EdgeInsets.only(bottom: DesignTokens.spacingMd),
-              child: _VehicleTypeCard(
-                type: type,
-                isSelected: isSelected,
-                onTap: () => setState(() => _selectedVehicleTypeId = type.id),
-              ).animate()
-                  .fadeIn(duration: DesignTokens.durationNormal)
-                  .slideY(begin: 0.1, end: 0, delay: Duration(milliseconds: 100 * _vehicleTypes.indexOf(type))),
-            );
-          }),
+          FutureBuilder<List<VehicleTypeModel>>(
+            future: _vehicleTypesFuture,
+            builder: (context, snapshot) {
+              if (snapshot.connectionState == ConnectionState.waiting) {
+                return const Center(child: CircularProgressIndicator());
+              }
+              if (snapshot.hasError || snapshot.data?.isEmpty != false) {
+                return Text(
+                  snapshot.hasError ? 'Vehicle options could not be loaded. Please try again later.' : 'No vehicle categories are available yet.',
+                  style: TokenTextStyles.bodyMedium(color: context.colors.error),
+                );
+              }
+              final types = snapshot.data!;
+              return Column(
+                children: types.map((catalogType) {
+                  final type = _VehicleType(
+                    id: catalogType.id,
+                    name: catalogType.name,
+                    icon: _vehicleIcon(catalogType.name),
+                    capacityKg: catalogType.capacityKg,
+                    baseFare: catalogType.baseFare,
+                    perKmRate: catalogType.perKmRate,
+                    perMinuteRate: catalogType.perMinuteRate,
+                  );
+                  final isSelected = _selectedVehicleTypeId == type.id;
+                  return Padding(
+                    padding: EdgeInsets.only(bottom: DesignTokens.spacingMd),
+                    child: _VehicleTypeCard(
+                      type: type,
+                      isSelected: isSelected,
+                      onTap: () => setState(() => _selectedVehicleTypeId = type.id),
+                    ).animate().fadeIn(duration: DesignTokens.durationNormal),
+                  );
+                }).toList(),
+              );
+            },
+          ),
         ],
       ),
     );
@@ -508,6 +630,24 @@ class _DriverOnboardingPageState extends ConsumerState<DriverOnboardingPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          if (_rejectionReason != null) ...[
+            PDCard(
+              variant: PDCardVariant.elevated,
+              padding: EdgeInsets.all(DesignTokens.spacingMd),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(Icons.info_outline, color: context.colors.error),
+                  SizedBox(width: DesignTokens.spacingSm),
+                  Expanded(child: Text(
+                    'Your previous KYC was rejected. Correct the documents and resubmit.\\n${_rejectionReason!.isEmpty ? 'Please review each document for clarity and validity.' : _rejectionReason}',
+                    style: TokenTextStyles.bodyMedium(color: context.colors.onSurface),
+                  )),
+                ],
+              ),
+            ),
+            SizedBox(height: DesignTokens.spacingMd),
+          ],
           Text('Upload Documents', style: TokenTextStyles.headlineSmall(color: context.colors.onSurface)),
           SizedBox(height: DesignTokens.spacingXs),
           Text(
@@ -524,6 +664,19 @@ class _DriverOnboardingPageState extends ConsumerState<DriverOnboardingPage> {
             onBackPicked: (img) => setState(() => _licenseBack = img),
             icon: Icons.badge_outlined,
           ),
+          SizedBox(height: DesignTokens.spacingSm),
+          PDInput(
+            label: 'Driving license number',
+            hint: 'Enter the number shown on your license',
+            onChanged: (value) => _licenseNumber = value,
+          ),
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            title: Text(_licenseExpiry == null ? 'Select license expiry date' :
+                'License expires ${_licenseExpiry!.day}/${_licenseExpiry!.month}/${_licenseExpiry!.year}'),
+            trailing: const Icon(Icons.calendar_month_outlined),
+            onTap: () => _pickExpiryDate(license: true),
+          ),
           SizedBox(height: DesignTokens.spacingMd),
           _buildDocumentUpload(
             title: 'Vehicle RC',
@@ -533,6 +686,19 @@ class _DriverOnboardingPageState extends ConsumerState<DriverOnboardingPage> {
             onFrontPicked: (img) => setState(() => _rcFront = img),
             onBackPicked: (img) => setState(() => _rcBack = img),
             icon: Icons.description_outlined,
+          ),
+          SizedBox(height: DesignTokens.spacingSm),
+          PDInput(
+            label: 'Vehicle RC number',
+            hint: 'Enter the number shown on the RC',
+            onChanged: (value) => _rcNumber = value,
+          ),
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            title: Text(_rcExpiry == null ? 'Select RC expiry date' :
+                'RC expires ${_rcExpiry!.day}/${_rcExpiry!.month}/${_rcExpiry!.year}'),
+            trailing: const Icon(Icons.calendar_month_outlined),
+            onTap: () => _pickExpiryDate(license: false),
           ),
           SizedBox(height: DesignTokens.spacingMd),
           _buildDocumentUpload(
@@ -782,53 +948,12 @@ class _VehicleType {
   });
 }
 
-const List<_VehicleType> _vehicleTypes = [
-  _VehicleType(
-    id: 'bike',
-    name: 'Bike / Scooter',
-    icon: Icons.two_wheeler_rounded,
-    capacityKg: 20,
-    baseFare: 30,
-    perKmRate: 12,
-    perMinuteRate: 1.5,
-  ),
-  _VehicleType(
-    id: 'three_wheeler',
-    name: '3-Wheeler / Tata Ace',
-    icon: Icons.local_shipping_rounded,
-    capacityKg: 500,
-    baseFare: 80,
-    perKmRate: 22,
-    perMinuteRate: 3,
-  ),
-  _VehicleType(
-    id: 'mini_truck',
-    name: 'Mini Truck 8ft',
-    icon: Icons.local_shipping_rounded,
-    capacityKg: 750,
-    baseFare: 150,
-    perKmRate: 35,
-    perMinuteRate: 5,
-  ),
-  _VehicleType(
-    id: 'pickup',
-    name: 'Pickup 9ft',
-    icon: Icons.local_shipping_rounded,
-    capacityKg: 1500,
-    baseFare: 200,
-    perKmRate: 45,
-    perMinuteRate: 6,
-  ),
-  _VehicleType(
-    id: 'large_truck',
-    name: 'Large Truck 12ft',
-    icon: Icons.local_shipping_rounded,
-    capacityKg: 5000,
-    baseFare: 500,
-    perKmRate: 80,
-    perMinuteRate: 10,
-  ),
-];
+IconData _vehicleIcon(String name) {
+  final value = name.toLowerCase();
+  if (value.contains('bike')) return Icons.two_wheeler_rounded;
+  if (value.contains('three') || value.contains('auto')) return Icons.local_shipping_rounded;
+  return Icons.local_shipping_rounded;
+}
 
 class _ImageUploadSlot extends StatelessWidget {
   final String label;

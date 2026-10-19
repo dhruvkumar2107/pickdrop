@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:go_router/go_router.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
 import '../../../../../config/router/route_names.dart';
 import '../../../../../core/constants/colors.dart';
@@ -50,14 +52,42 @@ class _AddAddressPageState extends State<AddAddressPage> {
     });
   }
 
-  void _save() {
+  Future<void> _save() async {
     if (!_formKey.currentState!.validate()) return;
     if (_lat == null || _lng == null) {
       AppToast.warning(context, 'Pick the exact location on the map');
       return;
     }
-    AppToast.success(context, 'Address saved');
-    context.pop();
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      AppToast.error(context, 'Sign in to save an address');
+      return;
+    }
+    try {
+      await FirebaseFirestore.instance.collection('savedAddresses').add({
+        'userId': user.uid,
+        'label':
+            _selectedLabel == 'Other' && _labelController.text.trim().isNotEmpty
+            ? _labelController.text.trim()
+            : _selectedLabel,
+        'type': _selectedLabel,
+        'address': _addressController.text.trim(),
+        'latitude': _lat,
+        'longitude': _lng,
+        'isDefault': false,
+        'createdAt': FieldValue.serverTimestamp(),
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+      if (!mounted) return;
+      AppToast.success(context, 'Address saved');
+      context.pop();
+    } catch (_) {
+      if (mounted)
+        AppToast.error(
+          context,
+          'Could not save the address. Please try again.',
+        );
+    }
   }
 
   @override
@@ -74,18 +104,25 @@ class _AddAddressPageState extends State<AddAddressPage> {
             child: SafeArea(
               bottom: false,
               child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: AppDimensions.spacingMd),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: AppDimensions.spacingMd,
+                ),
                 child: Row(
                   children: [
                     IconButton(
                       onPressed: () => context.pop(),
-                      icon: const Icon(Icons.arrow_back_rounded, color: Colors.white),
+                      icon: const Icon(
+                        Icons.arrow_back_rounded,
+                        color: Colors.white,
+                      ),
                     ),
                     const SizedBox(width: AppDimensions.spacingXs),
                     Expanded(
                       child: Text(
                         AppStrings.addAddress,
-                        style: AppTextStyles.headlineSmall.copyWith(color: Colors.white),
+                        style: AppTextStyles.headlineSmall.copyWith(
+                          color: Colors.white,
+                        ),
                       ),
                     ),
                   ],
@@ -108,7 +145,8 @@ class _AddAddressPageState extends State<AddAddressPage> {
                           .map(
                             (label) => Padding(
                               padding: const EdgeInsets.only(
-                                  right: AppDimensions.spacingSm),
+                                right: AppDimensions.spacingSm,
+                              ),
                               child: ChoiceChip(
                                 label: Text(label),
                                 selected: _selectedLabel == label,
@@ -145,16 +183,21 @@ class _AddAddressPageState extends State<AddAddressPage> {
                               color: AppColors.primary.withValues(alpha: 0.15),
                               shape: BoxShape.circle,
                             ),
-                            child: const Icon(Icons.map_outlined,
-                                color: AppColors.primary, size: 20),
+                            child: const Icon(
+                              Icons.map_outlined,
+                              color: AppColors.primary,
+                              size: 20,
+                            ),
                           ),
                           const SizedBox(width: AppDimensions.spacingMd),
                           Expanded(
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Text('Set location on map',
-                                    style: AppTextStyles.labelLarge),
+                                Text(
+                                  'Set location on map',
+                                  style: AppTextStyles.labelLarge,
+                                ),
                                 Text(
                                   _lat == null
                                       ? 'Required — tap to open the map'
@@ -168,8 +211,10 @@ class _AddAddressPageState extends State<AddAddressPage> {
                               ],
                             ),
                           ),
-                          const Icon(Icons.chevron_right_rounded,
-                              color: AppColors.onSurfaceVariant),
+                          const Icon(
+                            Icons.chevron_right_rounded,
+                            color: AppColors.onSurfaceVariant,
+                          ),
                         ],
                       ),
                     ),

@@ -256,6 +256,15 @@ class _ScheduledBookingsPageState extends State<ScheduledBookingsPage> {
               style: AppTextStyles.bodySmall
                   .copyWith(color: colors.onSurfaceVariant),
             ),
+            if (booking.intermediateStops.isNotEmpty) ...[
+              const SizedBox(height: AppDimensions.spacingXs),
+              Text(
+                'Stops: ${booking.intermediateStops.map((stop) => stop['address'] ?? '').join(' → ')}',
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: AppTextStyles.bodySmall.copyWith(color: colors.onSurfaceVariant),
+              ),
+            ],
             const SizedBox(height: AppDimensions.spacingMd),
             Row(
               children: [

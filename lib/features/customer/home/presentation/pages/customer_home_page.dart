@@ -43,55 +43,8 @@ class _CustomerHomePageState extends ConsumerState<CustomerHomePage> {
 
   bool _tourScheduled = false;
 
-  // Demo data - in production, these would come from backend
-  final List<SavedAddress> _savedAddresses = [
-    SavedAddress(
-      id: '1',
-      label: 'Home',
-      address: '123 MG Road, Bangalore, Karnataka 560001',
-      lat: 12.9716,
-      lng: 77.5946,
-      isDefault: true,
-    ),
-    SavedAddress(
-      id: '2',
-      label: 'Work',
-      address: '456 Koramangala, Bangalore, Karnataka 560034',
-      lat: 12.9352,
-      lng: 77.6146,
-      isDefault: false,
-    ),
-  ];
-
-  final List<RecentTrip> _recentTrips = [
-    RecentTrip(
-      id: 'PD-1048',
-      pickupAddress: '123 MG Road, Bangalore',
-      dropAddress: '456 Koramangala, Bangalore',
-      fare: 250.0,
-      dateTime: DateTime.now().subtract(const Duration(days: 2)),
-      vehicleType: 'Bike',
-      status: 'DELIVERED',
-    ),
-    RecentTrip(
-      id: 'PD-1047',
-      pickupAddress: '789 Indiranagar, Bangalore',
-      dropAddress: '321 Whitefield, Bangalore',
-      fare: 450.0,
-      dateTime: DateTime.now().subtract(const Duration(days: 5)),
-      vehicleType: '3-Wheeler',
-      status: 'DELIVERED',
-    ),
-    RecentTrip(
-      id: 'PD-1046',
-      pickupAddress: 'Shivaji Nagar, Pune',
-      dropAddress: 'Aundh Gaon, Pune',
-      fare: 50.0,
-      dateTime: DateTime.now().subtract(const Duration(days: 7)),
-      vehicleType: 'Pickup',
-      status: 'CANCELLED',
-    ),
-  ];
+  final List<SavedAddress> _savedAddresses = [];
+  final List<RecentTrip> _recentTrips = [];
 
   // Categories for quick booking
   static const List<_Category> _categories = [

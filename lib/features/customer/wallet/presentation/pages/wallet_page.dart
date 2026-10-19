@@ -1,11 +1,14 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:razorpay_flutter/razorpay_flutter.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:go_router/go_router.dart';
-import 'package:razorpay_flutter/razorpay_flutter.dart';
 import 'package:share_plus/share_plus.dart';
 
-import '../../../../../../config/env/env_config.dart';
 import '../../../../../../config/router/route_names.dart';
 import '../../../../../../core/constants/app_constants.dart';
 import '../../../../../../core/constants/colors.dart';
@@ -28,65 +31,19 @@ class WalletPage extends StatefulWidget {
 }
 
 class _WalletPageState extends State<WalletPage> {
-  double _balance = 1248.5;
+  double _balance = 0;
   bool _isBalanceVisible = true;
 
   static const List<int> _quickAmounts = [100, 200, 500, 1000, 2000, 5000];
 
+  final List<_WalletTransaction> _transactions = [];
   late final RazorpayService _razorpayService;
-  int? _selectedAmountForPayment;
-  bool _isProcessingPayment = false;
-
-  final List<_WalletTransaction> _transactions = [
-    _WalletTransaction(
-      title: 'Trip payment',
-      subtitle: 'Booking #PD1004',
-      amount: 520,
-      isCredit: false,
-      dateTime: DateTime(2026, 9, 28, 12, 10),
-      icon: Icons.local_shipping_outlined,
-    ),
-    _WalletTransaction(
-      title: 'Money added',
-      subtitle: 'UPI • •••• 4821',
-      amount: 1000,
-      isCredit: true,
-      dateTime: DateTime(2026, 9, 27, 18, 40),
-      icon: Icons.add_circle_outline_rounded,
-    ),
-    _WalletTransaction(
-      title: 'Refund',
-      subtitle: 'Trip cancelled',
-      amount: 150,
-      isCredit: true,
-      dateTime: DateTime(2026, 9, 25, 9, 5),
-      icon: Icons.replay_rounded,
-    ),
-    _WalletTransaction(
-      title: 'Trip payment',
-      subtitle: 'Booking #PD1005',
-      amount: 310,
-      isCredit: false,
-      dateTime: DateTime(2026, 9, 22, 17, 0),
-      icon: Icons.local_shipping_outlined,
-    ),
-    _WalletTransaction(
-      title: 'Money added',
-      subtitle: 'Debit card •••• 9012',
-      amount: 2000,
-      isCredit: true,
-      dateTime: DateTime(2026, 9, 20, 14, 25),
-      icon: Icons.add_circle_outline_rounded,
-    ),
-    _WalletTransaction(
-      title: 'Trip payment',
-      subtitle: 'Booking #PD1003',
-      amount: 199,
-      isCredit: false,
-      dateTime: DateTime(2026, 9, 18, 10, 45),
-      icon: Icons.local_shipping_outlined,
-    ),
-  ];
+  StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>?
+  _walletSubscription;
+  StreamSubscription<QuerySnapshot<Map<String, dynamic>>>?
+  _transactionsSubscription;
+  String? _pendingOrderId;
+  bool _topupInProgress = false;
 
   String _formatDate(DateTime date) {
     final hh = date.hour.toString().padLeft(2, '0');
@@ -99,13 +56,64 @@ class _WalletPageState extends State<WalletPage> {
     super.initState();
     _razorpayService = RazorpayService();
     _razorpayService.setCallbacks(
-      onSuccess: _handleWalletPaymentSuccess,
-      onError: _handleWalletPaymentError,
+      onSuccess: _onTopupSuccess,
+      onError: (_) {
+        if (!mounted) return;
+        setState(() {
+          _topupInProgress = false;
+          _pendingOrderId = null;
+        });
+        AppToast.error(context, 'Wallet payment was cancelled or failed.');
+      },
     );
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid != null) {
+      _walletSubscription = FirebaseFirestore.instance
+          .collection('wallets')
+          .doc(uid)
+          .snapshots()
+          .listen((snapshot) {
+            if (mounted)
+              setState(
+                () => _balance =
+                    (snapshot.data()?['balance'] as num?)?.toDouble() ?? 0,
+              );
+          });
+      _transactionsSubscription = FirebaseFirestore.instance
+          .collection('walletTransactions')
+          .where('userId', isEqualTo: uid)
+          .snapshots()
+          .listen((snapshot) {
+            if (!mounted) return;
+            final items = snapshot.docs.map((doc) {
+              final data = doc.data();
+              final credit =
+                  data['type'] == 'TOPUP' || data['type'] == 'CREDIT';
+              final created = data['createdAt'];
+              return _WalletTransaction(
+                title: credit ? 'Wallet top-up' : 'Wallet activity',
+                subtitle: (data['status'] ?? '').toString(),
+                amount: (data['amount'] as num? ?? 0).toDouble(),
+                isCredit: credit,
+                dateTime: created is Timestamp
+                    ? created.toDate()
+                    : DateTime.now(),
+                icon: credit ? Icons.add_circle_outline : Icons.receipt_long,
+              );
+            }).toList()..sort((a, b) => b.dateTime.compareTo(a.dateTime));
+            setState(() {
+              _transactions
+                ..clear()
+                ..addAll(items);
+            });
+          });
+    }
   }
 
   @override
   void dispose() {
+    _walletSubscription?.cancel();
+    _transactionsSubscription?.cancel();
     _razorpayService.dispose();
     super.dispose();
   }
@@ -151,54 +159,55 @@ class _WalletPageState extends State<WalletPage> {
     );
   }
 
-  void _initiatePayment(int amount) {
-    _selectedAmountForPayment = amount;
-    if (!EnvConfig.isRazorpayConfigured) {
-      // Demo mode - add money directly
-      _addMoneyToWallet(amount);
-      return;
-    }
-
-    setState(() => _isProcessingPayment = true);
-
-    _razorpayService.openCheckout(
-      amount: amount.toDouble(),
-      orderId: 'wallet_${DateTime.now().millisecondsSinceEpoch}',
-      description: 'Add money to PickDrop wallet',
-      customerName: 'Customer',
-      customerEmail: 'customer@example.com',
-      customerPhone: '+919876543210',
-    );
-  }
-
-  void _handleWalletPaymentSuccess(PaymentSuccessResponse response) {
-    setState(() => _isProcessingPayment = false);
-    if (_selectedAmountForPayment != null) {
-      _addMoneyToWallet(_selectedAmountForPayment!);
-    }
-  }
-
-  void _handleWalletPaymentError(PaymentFailureResponse response) {
-    setState(() => _isProcessingPayment = false);
-    AppToast.error(context, 'Payment failed: ${response.message}');
-  }
-
-  void _addMoneyToWallet(int amount) {
-    setState(() {
-      _balance += amount;
-      _transactions.insert(
-        0,
-        _WalletTransaction(
-          title: 'Money added',
-          subtitle: 'Online payment',
-          amount: amount.toDouble(),
-          isCredit: true,
-          dateTime: DateTime.now(),
-          icon: Icons.add_circle_outline_rounded,
-        ),
+  Future<void> _initiatePayment(int amount) async {
+    if (_topupInProgress) return;
+    setState(() => _topupInProgress = true);
+    try {
+      final order = await _razorpayService.createWalletOrder(amount);
+      _pendingOrderId = order['orderId'] as String;
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) throw StateError('Sign in to add money.');
+      await _razorpayService.openCheckout(
+        amount: amount.toDouble(),
+        orderId: _pendingOrderId!,
+        description: 'PickDrop wallet top-up',
+        customerName: user.displayName ?? '',
+        customerEmail: user.email ?? '',
+        customerPhone: user.phoneNumber ?? '',
       );
+    } catch (e) {
+      if (mounted)
+        AppToast.error(
+          context,
+          'Could not start wallet top-up. ${e is StateError ? e.message : ''}',
+        );
+      if (mounted) setState(() => _topupInProgress = false);
+    }
+  }
+
+  Future<void> _onTopupSuccess(PaymentSuccessResponse response) async {
+    final orderId = _pendingOrderId;
+    if (orderId == null ||
+        response.paymentId == null ||
+        response.signature == null)
+      return;
+    final paid = await _razorpayService.verifyWalletPayment(
+      orderId: orderId,
+      paymentId: response.paymentId!,
+      signature: response.signature!,
+    );
+    if (!mounted) return;
+    setState(() {
+      _topupInProgress = false;
+      _pendingOrderId = null;
     });
-    AppToast.success(context, '₹$amount added to ${AppStrings.wallet}');
+    if (paid)
+      AppToast.success(context, 'Wallet top-up received.');
+    else
+      AppToast.error(
+        context,
+        'Payment could not be verified. Contact support with your payment ID.',
+      );
   }
 
   void _openCoupons() {
@@ -212,10 +221,7 @@ class _WalletPageState extends State<WalletPage> {
         'Use my PickDrop referral code $referralCode and get ₹50 off your first ride or delivery. Download the app and enter my code at checkout.';
 
     await SharePlus.instance.share(
-      ShareParams(
-        text: message,
-        subject: 'PickDrop referral code',
-      ),
+      ShareParams(text: message, subject: 'PickDrop referral code'),
     );
     if (!mounted) return;
     AppToast.success(context, 'Referral invite ready to share');
@@ -294,9 +300,9 @@ class _WalletPageState extends State<WalletPage> {
                 itemBuilder: (context, index) {
                   final transaction = _transactions[index];
                   return _TransactionTile(
-                    transaction: transaction,
-                    formattedDate: _formatDate(transaction.dateTime),
-                  )
+                        transaction: transaction,
+                        formattedDate: _formatDate(transaction.dateTime),
+                      )
                       .animate()
                       .fadeIn(duration: AppConstants.mediumAnimation)
                       .slideX(
@@ -385,8 +391,9 @@ class _WalletPageState extends State<WalletPage> {
                         padding: const EdgeInsets.all(AppDimensions.spacingSm),
                         decoration: BoxDecoration(
                           color: Colors.white.withValues(alpha: 0.18),
-                          borderRadius:
-                              BorderRadius.circular(AppDimensions.radiusSm),
+                          borderRadius: BorderRadius.circular(
+                            AppDimensions.radiusSm,
+                          ),
                         ),
                         child: Icon(
                           _isBalanceVisible
@@ -417,7 +424,7 @@ class _WalletPageState extends State<WalletPage> {
                   children: [
                     Expanded(
                       child: GradientButton(
-                        text: _isProcessingPayment ? 'Processing...' : AppStrings.addMoney,
+                        text: AppStrings.addMoney,
                         leadingIcon: Icons.add_rounded,
                         height: AppDimensions.buttonHeightMd,
                         borderRadius: AppDimensions.radiusMd,
@@ -428,7 +435,7 @@ class _WalletPageState extends State<WalletPage> {
                           ],
                         ),
                         foregroundColor: colors.primaryDark,
-                        onPressed: _isProcessingPayment ? null : _openAddMoneySheet,
+                        onPressed: _openAddMoneySheet,
                       ),
                     ),
                     const SizedBox(width: AppDimensions.spacingMd),
@@ -553,7 +560,10 @@ class _WalletPageState extends State<WalletPage> {
     );
   }
 
-  Widget _buildCouponsShortcut(BuildContext context, AppColorsExtension colors) {
+  Widget _buildCouponsShortcut(
+    BuildContext context,
+    AppColorsExtension colors,
+  ) {
     return Container(
       padding: const EdgeInsets.all(AppDimensions.spacingLg),
       decoration: BoxDecoration(
@@ -608,7 +618,8 @@ class _WalletPageState extends State<WalletPage> {
                         color: colors.onSurface,
                       ),
                     ),
-                    const SizedBox(height: 2),                    Text(
+                    const SizedBox(height: 2),
+                    Text(
                       'Save more on your next trip',
                       style: TextStyle(
                         fontFamily: 'Poppins',
@@ -664,7 +675,9 @@ class _TransactionTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.colors;
     final amountColor = transaction.isCredit ? colors.success : colors.error;
-    final amountBg = transaction.isCredit ? colors.successLight : colors.errorLight;
+    final amountBg = transaction.isCredit
+        ? colors.successLight
+        : colors.errorLight;
     final sign = transaction.isCredit ? '+' : '−';
 
     return Container(
@@ -690,7 +703,11 @@ class _TransactionTile extends StatelessWidget {
               color: amountBg,
               borderRadius: BorderRadius.circular(AppDimensions.radiusMd),
             ),
-            child: Icon(transaction.icon, color: amountColor, size: AppDimensions.iconMd),
+            child: Icon(
+              transaction.icon,
+              color: amountColor,
+              size: AppDimensions.iconMd,
+            ),
           ),
           const SizedBox(width: AppDimensions.spacingMd),
           Expanded(
@@ -848,9 +865,7 @@ class _QuickAmountSheetState extends State<_QuickAmountSheet> {
         ),
         const SizedBox(height: AppDimensions.spacingSm),
         Text(
-          widget.isAddMoney
-              ? 'You will be redirected to complete the payment'
-              : 'Demo mode — no real payment is processed',
+          'You will be redirected to complete payment securely',
           textAlign: TextAlign.center,
           style: TextStyle(
             fontFamily: 'Poppins',

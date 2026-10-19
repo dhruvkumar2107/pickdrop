@@ -1,9 +1,15 @@
+import 'dart:async';
+
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:flutter_svg/flutter_svg.dart';
+import 'package:uuid/uuid.dart';
 
+import '../../../../../config/env/env_config.dart';
 import '../../../../../core/constants/app_constants.dart';
 import '../../../../../core/constants/colors.dart';
 import '../../../../../core/constants/dimensions.dart';
@@ -31,60 +37,24 @@ class MapPickerPage extends StatefulWidget {
 class _MapPickerPageState extends State<MapPickerPage>
     with SingleTickerProviderStateMixin {
   static const LatLng _initialPosition = LatLng(12.9716, 77.5946);
-  static const String _initialAddress = 'MG Road, Bengaluru, Karnataka';
   static const double _panelTravel = 40.0;
   static const double _panelHeight = 176.0;
-
-  static const List<_SuggestedPlace> _suggestedPlaces = [
-    _SuggestedPlace(
-      title: 'MG Road',
-      address: 'MG Road, Bengaluru, Karnataka',
-      lat: 12.9756,
-      lng: 77.6068,
-    ),
-    _SuggestedPlace(
-      title: 'Indiranagar',
-      address: '100 Feet Road, Indiranagar, Bengaluru',
-      lat: 12.9719,
-      lng: 77.6412,
-    ),
-    _SuggestedPlace(
-      title: 'Koramangala',
-      address: '5th Block, Koramangala, Bengaluru',
-      lat: 12.9352,
-      lng: 77.6245,
-    ),
-    _SuggestedPlace(
-      title: 'Whitefield',
-      address: 'ITPL Main Road, Whitefield, Bengaluru',
-      lat: 12.9698,
-      lng: 77.75,
-    ),
-    _SuggestedPlace(
-      title: 'City Railway Station',
-      address: 'Bengaluru City Junction, Bengaluru',
-      lat: 12.9767,
-      lng: 77.5713,
-    ),
-    _SuggestedPlace(
-      title: 'Cubbon Park',
-      address: 'Kasturba Road, Bengaluru, Karnataka',
-      lat: 12.9763,
-      lng: 77.5929,
-    ),
-  ];
 
   GoogleMapController? _mapController;
   late final TextEditingController _searchController;
   late final AnimationController _panelController;
   LatLng _pickedPosition = _initialPosition;
-  String _pickedAddress = _initialAddress;
+  String _pickedAddress = '';
+  bool _hasExplicitSelection = false;
+  bool _programmaticCameraMove = false;
+  bool _userMovedMap = false;
+  bool _hasLocationPermission = false;
   bool _isLocating = false;
 
   @override
   void initState() {
     super.initState();
-    _searchController = TextEditingController(text: _initialAddress);
+    _searchController = TextEditingController();
     _panelController = AnimationController(
       vsync: this,
       duration: AppConstants.shortAnimation,
@@ -100,26 +70,12 @@ class _MapPickerPageState extends State<MapPickerPage>
     super.dispose();
   }
 
-  /// Lightweight reverse geocode against the mock place list.
-  static String _addressFor(LatLng position) {
-    _SuggestedPlace? closest;
-    var bestDistance = double.infinity;
-    for (final place in _suggestedPlaces) {
-      final delta =
-          (place.lat - position.latitude).abs() +
-          (place.lng - position.longitude).abs();
-      if (delta < bestDistance) {
-        bestDistance = delta;
-        closest = place;
-      }
-    }
-    if (closest != null && bestDistance < 0.03) return closest.address;
-    return 'Pinned near ${position.latitude.toStringAsFixed(4)}, '
-        '${position.longitude.toStringAsFixed(4)}';
-  }
-
   void _onMapCreated(GoogleMapController controller) {
     _mapController = controller;
+  }
+
+  void _onCameraMoveStarted() {
+    if (!_programmaticCameraMove) _userMovedMap = true;
   }
 
   void _onCameraMove(CameraPosition position) {
@@ -128,22 +84,38 @@ class _MapPickerPageState extends State<MapPickerPage>
 
   void _onCameraIdle() {
     if (!mounted) return;
-    final address = _addressFor(_pickedPosition);
+    if (_programmaticCameraMove) {
+      _userMovedMap = false;
+      _programmaticCameraMove = false;
+      return;
+    }
+    if (!_userMovedMap) return;
+    _userMovedMap = false;
     setState(() {
-      _pickedAddress = address;
-      _searchController.text = address;
+      _hasExplicitSelection = true;
+      _pickedAddress = 'Pinned location';
+      _searchController.text = _pickedAddress;
     });
   }
 
-  void _animateTo(LatLng target, {double zoom = AppConstants.defaultMapZoom}) {
+  Future<void> _animateTo(
+    LatLng target, {
+    double zoom = AppConstants.defaultMapZoom,
+  }) async {
     if (!mounted) return;
     final controller = _mapController;
     if (controller == null) return;
-    controller.animateCamera(
-      CameraUpdate.newCameraPosition(
-        CameraPosition(target: target, zoom: zoom),
-      ),
-    );
+    _programmaticCameraMove = true;
+    try {
+      await controller.animateCamera(
+        CameraUpdate.newCameraPosition(
+          CameraPosition(target: target, zoom: zoom),
+        ),
+      );
+    } finally {
+      _programmaticCameraMove = false;
+      _userMovedMap = false;
+    }
   }
 
   void _selectPlace(_SuggestedPlace place) {
@@ -152,29 +124,16 @@ class _MapPickerPageState extends State<MapPickerPage>
       _pickedPosition = target;
       _pickedAddress = place.address;
       _searchController.text = place.address;
+      _hasExplicitSelection = true;
     });
-    _animateTo(target, zoom: 16);
+    unawaited(_animateTo(target, zoom: 16));
   }
 
   Future<void> _openSearchSheet() async {
     final selected = await showAppBottomSheet<_SuggestedPlace>(
       context: context,
       title: AppStrings.searchLocation,
-      isScrollable: true,
-      builder: (sheetContext) => ListView.separated(
-        shrinkWrap: true,
-        physics: const ClampingScrollPhysics(),
-        itemCount: _suggestedPlaces.length,
-        separatorBuilder: (context, index) =>
-            const SizedBox(height: AppDimensions.spacingXs),
-        itemBuilder: (context, index) {
-          final place = _suggestedPlaces[index];
-          return _PlaceTile(
-            place: place,
-            onTap: () => Navigator.of(context).maybePop(place),
-          );
-        },
-      ),
+      builder: (_) => _PlaceSearchSheet(center: _pickedPosition),
     );
     if (selected == null || !mounted) return;
     _selectPlace(selected);
@@ -194,6 +153,9 @@ class _MapPickerPageState extends State<MapPickerPage>
         AppToast.info(context, AppStrings.enableLocation);
         return;
       }
+      if (!_hasLocationPermission) {
+        setState(() => _hasLocationPermission = true);
+      }
 
       final position = await Geolocator.getCurrentPosition(
         desiredAccuracy: LocationAccuracy.high,
@@ -203,10 +165,11 @@ class _MapPickerPageState extends State<MapPickerPage>
       final target = LatLng(position.latitude, position.longitude);
       setState(() {
         _pickedPosition = target;
-        _pickedAddress = _addressFor(target);
+        _pickedAddress = 'Current location';
+        _hasExplicitSelection = true;
         _searchController.text = _pickedAddress;
       });
-      _animateTo(target, zoom: 16);
+      unawaited(_animateTo(target, zoom: 16));
     } catch (_) {
       if (!mounted) return;
       AppToast.info(context, AppStrings.enableLocation);
@@ -230,6 +193,13 @@ class _MapPickerPageState extends State<MapPickerPage>
 
   void _confirmLocation() {
     if (!mounted) return;
+    if (!_hasExplicitSelection || _pickedAddress.trim().isEmpty) {
+      AppToast.info(
+        context,
+        'Search for a place, move the pin, or use your current location.',
+      );
+      return;
+    }
     final MapPickerResult result = (
       lat: _pickedPosition.latitude,
       lng: _pickedPosition.longitude,
@@ -263,8 +233,9 @@ class _MapPickerPageState extends State<MapPickerPage>
               zoom: AppConstants.defaultMapZoom,
             ),
             onCameraMove: _onCameraMove,
+            onCameraMoveStarted: _onCameraMoveStarted,
             onCameraIdle: _onCameraIdle,
-            myLocationEnabled: true,
+            myLocationEnabled: _hasLocationPermission,
             myLocationButtonEnabled: false,
             zoomControlsEnabled: false,
             mapToolbarEnabled: false,
@@ -547,89 +518,274 @@ class _CenterPin extends StatelessWidget {
   }
 }
 
-class _PlaceTile extends StatelessWidget {
-  final _SuggestedPlace place;
-  final VoidCallback onTap;
-
-  const _PlaceTile({required this.place, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-
-    return Material(
-      color: colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(AppDimensions.radiusSm),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(
-            horizontal: AppDimensions.spacingXs,
-            vertical: AppDimensions.spacingSm,
-          ),
-          child: Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(AppDimensions.spacingSm),
-                decoration: BoxDecoration(
-                  color: colors.primaryContainer,
-                  borderRadius: const BorderRadius.all(
-                    Radius.circular(AppDimensions.radiusSm),
-                  ),
-                ),
-                child: Icon(
-                  Icons.location_on_outlined,
-                  size: AppDimensions.iconSm,
-                  color: colors.primary,
-                ),
-              ),
-              const SizedBox(width: AppDimensions.spacingMd),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      place.title,
-                      style: AppTextStyles.titleMedium.copyWith(
-                        color: colors.onSurface,
-                      ),
-                    ),
-                    const SizedBox(height: AppDimensions.spacingXxs),
-                    Text(
-                      place.address,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: AppTextStyles.bodySmall.copyWith(
-                        color: colors.onSurfaceVariant,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: AppDimensions.spacingSm),
-              Icon(
-                Icons.north_east_rounded,
-                size: AppDimensions.iconSm,
-                color: colors.onSurfaceVariant,
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
 class _SuggestedPlace {
+  final String placeId;
   final String title;
   final String address;
   final double lat;
   final double lng;
 
   const _SuggestedPlace({
+    required this.placeId,
     required this.title,
     required this.address,
     required this.lat,
     required this.lng,
   });
+}
+
+class _PlacePrediction {
+  final String placeId;
+  final String mainText;
+  final String secondaryText;
+  final String description;
+
+  const _PlacePrediction({
+    required this.placeId,
+    required this.mainText,
+    required this.secondaryText,
+    required this.description,
+  });
+}
+
+class _PlaceSearchSheet extends StatefulWidget {
+  const _PlaceSearchSheet({required this.center});
+
+  final LatLng center;
+
+  @override
+  State<_PlaceSearchSheet> createState() => _PlaceSearchSheetState();
+}
+
+class _PlaceSearchSheetState extends State<_PlaceSearchSheet> {
+  final TextEditingController _queryController = TextEditingController();
+  final String _sessionToken = const Uuid().v4();
+  final List<_PlacePrediction> _predictions = [];
+  Timer? _debounce;
+  bool _loading = false;
+  bool _loadingDetails = false;
+  String? _error;
+  int _requestId = 0;
+
+  @override
+  void dispose() {
+    _debounce?.cancel();
+    _queryController.dispose();
+    super.dispose();
+  }
+
+  void _onQueryChanged(String value) {
+    _debounce?.cancel();
+    final query = value.trim();
+    final requestId = ++_requestId;
+    if (query.length < 3) {
+      setState(() {
+        _predictions.clear();
+        _loading = false;
+        _error = null;
+      });
+      return;
+    }
+    setState(() {
+      _loading = true;
+      _error = null;
+      _predictions.clear();
+    });
+    _debounce = Timer(const Duration(milliseconds: 500), () {
+      _search(query, requestId);
+    });
+  }
+
+  Future<void> _search(String query, int requestId) async {
+    try {
+      final result =
+          await FirebaseFunctions.instanceFor(region: EnvConfig.functionsRegion)
+              .httpsCallable('searchPlaces')
+              .call({
+                'query': query,
+                'sessionToken': _sessionToken,
+                'center': {
+                  'lat': widget.center.latitude,
+                  'lng': widget.center.longitude,
+                },
+              });
+      final data = Map<String, dynamic>.from(result.data as Map);
+      final suggestions = (data['suggestions'] as List<dynamic>? ?? const [])
+          .whereType<Map>()
+          .map((item) => Map<String, dynamic>.from(item))
+          .map(
+            (item) => _PlacePrediction(
+              placeId: item['placeId'] as String,
+              mainText: item['mainText'] as String? ?? '',
+              secondaryText: item['secondaryText'] as String? ?? '',
+              description: item['description'] as String? ?? '',
+            ),
+          )
+          .toList(growable: false);
+      if (!mounted || requestId != _requestId) return;
+      setState(() {
+        _predictions
+          ..clear()
+          ..addAll(suggestions);
+        _loading = false;
+      });
+    } on FirebaseFunctionsException catch (exception) {
+      if (!mounted || requestId != _requestId) return;
+      setState(() {
+        _loading = false;
+        _error = exception.code == 'failed-precondition'
+            ? 'Place search is not configured yet. You can still move the map pin.'
+            : 'Place search is unavailable. Check your connection and try again.';
+      });
+    } catch (_) {
+      if (!mounted || requestId != _requestId) return;
+      setState(() {
+        _loading = false;
+        _error =
+            'Place search is unavailable. Check your connection and try again.';
+      });
+    }
+  }
+
+  Future<void> _selectPrediction(_PlacePrediction prediction) async {
+    setState(() {
+      _loadingDetails = true;
+      _error = null;
+    });
+    try {
+      final result =
+          await FirebaseFunctions.instanceFor(region: EnvConfig.functionsRegion)
+              .httpsCallable('getPlaceDetails')
+              .call({
+                'placeId': prediction.placeId,
+                'sessionToken': _sessionToken,
+              });
+      final data = Map<String, dynamic>.from(result.data as Map);
+      final place = _SuggestedPlace(
+        placeId: data['placeId'] as String? ?? prediction.placeId,
+        title: prediction.mainText.isEmpty
+            ? prediction.description
+            : prediction.mainText,
+        address: data['address'] as String,
+        lat: (data['lat'] as num).toDouble(),
+        lng: (data['lng'] as num).toDouble(),
+      );
+      if (mounted) Navigator.of(context).pop(place);
+    } on FirebaseFunctionsException catch (exception) {
+      if (mounted) {
+        setState(() {
+          _loadingDetails = false;
+          _error =
+              exception.message ??
+              'Could not load this place. Choose another result.';
+        });
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _loadingDetails = false;
+          _error = 'Could not load this place. Choose another result.';
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final usableHeight =
+        (MediaQuery.sizeOf(context).height -
+                MediaQuery.viewInsetsOf(context).bottom)
+            .clamp(240.0, 720.0)
+            .toDouble();
+    final listHeight = usableHeight * 0.42;
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        TextField(
+          controller: _queryController,
+          autofocus: true,
+          onChanged: _onQueryChanged,
+          textInputAction: TextInputAction.search,
+          decoration: InputDecoration(
+            prefixIcon: const Icon(Icons.search_rounded),
+            hintText: 'Search an address or place',
+            suffixIcon: _loading
+                ? const Padding(
+                    padding: EdgeInsets.all(14),
+                    child: SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                  )
+                : null,
+          ),
+        ),
+        const SizedBox(height: AppDimensions.spacingSm),
+        SizedBox(
+          height: listHeight,
+          child: _loadingDetails
+              ? const Center(child: CircularProgressIndicator())
+              : _error != null
+              ? Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(AppDimensions.spacingMd),
+                    child: Text(_error!, textAlign: TextAlign.center),
+                  ),
+                )
+              : _predictions.isEmpty
+              ? Center(
+                  child: Text(
+                    _queryController.text.trim().length < 3
+                        ? 'Type at least 3 characters to search.'
+                        : 'No matching places found.',
+                    style: AppTextStyles.bodySmall.copyWith(
+                      color: colors.onSurfaceVariant,
+                    ),
+                  ),
+                )
+              : ListView.separated(
+                  itemCount: _predictions.length,
+                  separatorBuilder: (_, __) => const Divider(height: 1),
+                  itemBuilder: (context, index) {
+                    final prediction = _predictions[index];
+                    return ListTile(
+                      leading: const Icon(Icons.location_on_outlined),
+                      title: Text(
+                        prediction.mainText.isEmpty
+                            ? prediction.description
+                            : prediction.mainText,
+                      ),
+                      subtitle: prediction.secondaryText.isEmpty
+                          ? null
+                          : Text(prediction.secondaryText),
+                      onTap: _loadingDetails
+                          ? null
+                          : () => _selectPrediction(prediction),
+                    );
+                  },
+                ),
+        ),
+        const SizedBox(height: AppDimensions.spacingSm),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.end,
+          children: [
+            SvgPicture.asset(
+              'assets/icons/ic_google.svg',
+              width: 24,
+              height: 24,
+            ),
+            const SizedBox(width: AppDimensions.spacingXs),
+            Text(
+              'Powered by Google',
+              style: AppTextStyles.labelSmall.copyWith(
+                color: colors.onSurfaceVariant,
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
 }

@@ -1,12 +1,15 @@
 import 'dart:math';
 
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../../../../core/constants/colors.dart';
 import '../../../../../core/constants/dimensions.dart';
 import '../../../../../core/theme/text_styles.dart';
 import '../../../../../core/widgets/app_toast.dart';
 import '../../../../../core/widgets/glass_card.dart';
+import '../../../../../config/router/route_names.dart';
+import '../../../../common/map/presentation/pages/map_picker_page.dart';
 
 class DeliveryStop {
   const DeliveryStop({
@@ -52,11 +55,10 @@ class StopsEditorWidget extends StatelessWidget {
   final double baseDistanceKm;
 
   static DeliveryStop createStop() {
-    final otp = Random().nextInt(10000).toString().padLeft(4, '0');
     return DeliveryStop(
       id: 'stop_${DateTime.now().microsecondsSinceEpoch}',
       label: '',
-      otp: otp,
+      otp: '',
     );
   }
 
@@ -66,8 +68,14 @@ class StopsEditorWidget extends StatelessWidget {
     double fromLng = 0,
   }) {
     if (stops.length < 2) return List<DeliveryStop>.of(stops);
-    final positioned = [for (final stop in stops) if (stop.hasPosition) stop];
-    final others = [for (final stop in stops) if (!stop.hasPosition) stop];
+    final positioned = [
+      for (final stop in stops)
+        if (stop.hasPosition) stop,
+    ];
+    final others = [
+      for (final stop in stops)
+        if (!stop.hasPosition) stop,
+    ];
     if (positioned.length < 2) return List<DeliveryStop>.of(stops);
     final remaining = [...positioned];
     final ordered = <DeliveryStop>[];
@@ -83,7 +91,12 @@ class StopsEditorWidget extends StatelessWidget {
       var bestIndex = 0;
       var bestDistance = double.infinity;
       for (var i = 0; i < remaining.length; i++) {
-        final distance = _haversineKm(cx, cy, remaining[i].lat, remaining[i].lng);
+        final distance = _haversineKm(
+          cx,
+          cy,
+          remaining[i].lat,
+          remaining[i].lng,
+        );
         if (distance < bestDistance) {
           bestDistance = distance;
           bestIndex = i;
@@ -97,11 +110,17 @@ class StopsEditorWidget extends StatelessWidget {
     return [...ordered, ...others];
   }
 
-  static double _haversineKm(double lat1, double lng1, double lat2, double lng2) {
+  static double _haversineKm(
+    double lat1,
+    double lng1,
+    double lat2,
+    double lng2,
+  ) {
     const earthRadiusKm = 6371.0;
     final dLat = _toRad(lat2 - lat1);
     final dLng = _toRad(lng2 - lng1);
-    final a = sin(dLat / 2) * sin(dLat / 2) +
+    final a =
+        sin(dLat / 2) * sin(dLat / 2) +
         cos(_toRad(lat1)) * cos(_toRad(lat2)) * sin(dLng / 2) * sin(dLng / 2);
     return earthRadiusKm * 2 * atan2(sqrt(a), sqrt(1 - a));
   }
@@ -137,16 +156,18 @@ class StopsEditorWidget extends StatelessWidget {
     final origin = value.firstWhere((stop) => stop.hasPosition);
     final next = optimise(value, fromLat: origin.lat, fromLng: origin.lng);
     final changed =
-        next.map((stop) => stop.id).join('|') != value.map((stop) => stop.id).join('|');
+        next.map((stop) => stop.id).join('|') !=
+        value.map((stop) => stop.id).join('|');
     if (!changed) {
       AppToast.info(context, 'Route already optimal');
       return;
     }
     final before = _routeKm(value, fromLat: origin.lat, fromLng: origin.lng);
     final after = _routeKm(next, fromLat: origin.lat, fromLng: origin.lng);
-    final saved = (_minutes(before, value.length) - _minutes(after, next.length))
-        .round()
-        .clamp(1, 999);
+    final saved =
+        (_minutes(before, value.length) - _minutes(after, next.length))
+            .round()
+            .clamp(1, 999);
     _emit(next);
     AppToast.success(context, 'Route optimised — saves ~$saved min');
   }
@@ -163,27 +184,37 @@ class StopsEditorWidget extends StatelessWidget {
         children: [
           Row(
             children: [
-              Icon(Icons.route_rounded, size: AppDimensions.iconSm, color: colors.primary),
+              Icon(
+                Icons.route_rounded,
+                size: AppDimensions.iconSm,
+                color: colors.primary,
+              ),
               const SizedBox(width: AppDimensions.spacingSm),
               Expanded(
                 child: Text(
                   'Intermediate stops',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: AppTextStyles.labelLarge.copyWith(color: colors.onSurface),
+                  style: AppTextStyles.labelLarge.copyWith(
+                    color: colors.onSurface,
+                  ),
                 ),
               ),
               if (value.length > 1)
                 TextButton(
                   onPressed: () => _optimise(context),
                   style: TextButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: AppDimensions.spacingSm),
-                      minimumSize: Size.zero,
-                      tapTargetSize: MaterialTapTargetSize.shrinkWrap),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: AppDimensions.spacingSm,
+                    ),
+                    minimumSize: Size.zero,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
                   child: Text(
                     'Optimise route',
-                    style: AppTextStyles.labelSmall.copyWith(color: colors.primary),
+                    style: AppTextStyles.labelSmall.copyWith(
+                      color: colors.primary,
+                    ),
                   ),
                 ),
               Container(
@@ -197,7 +228,9 @@ class StopsEditorWidget extends StatelessWidget {
                 ),
                 child: Text(
                   '${value.length}/$maxStops',
-                  style: AppTextStyles.labelSmall.copyWith(color: colors.primary),
+                  style: AppTextStyles.labelSmall.copyWith(
+                    color: colors.primary,
+                  ),
                 ),
               ),
             ],
@@ -206,8 +239,10 @@ class StopsEditorWidget extends StatelessWidget {
           if (value.isEmpty)
             Text(
               'Add up to 5 stops — each gets its own OTP for proof of delivery.',
-              style: AppTextStyles.bodySmall
-                  .copyWith(color: colors.onSurfaceVariant, fontSize: 11),
+              style: AppTextStyles.bodySmall.copyWith(
+                color: colors.onSurfaceVariant,
+                fontSize: 11,
+              ),
             ),
           for (var i = 0; i < value.length; i++) ...[
             if (i > 0) const SizedBox(height: AppDimensions.spacingSm),
@@ -223,6 +258,21 @@ class StopsEditorWidget extends StatelessWidget {
                 _emit(next);
               },
               onRemove: () => _emit([...value]..removeAt(i)),
+              onPickLocation: () async {
+                final picked = await context.push<MapPickerResult>(
+                  RouteNames.mapPicker,
+                );
+                if (picked == null) return;
+                final next = [...value];
+                next[i] = next[i].copyWith(
+                  label: picked.address.isEmpty
+                      ? next[i].label
+                      : picked.address,
+                  lat: picked.lat,
+                  lng: picked.lng,
+                );
+                _emit(next);
+              },
               onMoveUp: i == 0
                   ? null
                   : () {
@@ -251,7 +301,9 @@ class StopsEditorWidget extends StatelessWidget {
                       : () => _emit([...value, createStop()]),
                   icon: const Icon(Icons.add_location_alt_outlined, size: 16),
                   label: Text(
-                    value.length >= maxStops ? 'Stop limit reached' : 'Add stop',
+                    value.length >= maxStops
+                        ? 'Stop limit reached'
+                        : 'Add stop',
                     style: const TextStyle(
                       fontFamily: 'Poppins',
                       fontSize: 12,
@@ -265,7 +317,9 @@ class StopsEditorWidget extends StatelessWidget {
                       vertical: AppDimensions.spacingSm,
                     ),
                     shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(AppDimensions.radiusMd),
+                      borderRadius: BorderRadius.circular(
+                        AppDimensions.radiusMd,
+                      ),
                     ),
                   ),
                 ),
@@ -285,15 +339,20 @@ class StopsEditorWidget extends StatelessWidget {
               ),
               child: Row(
                 children: [
-                  Icon(Icons.straighten_rounded,
-                      size: 14, color: colors.onSurfaceVariant),
+                  Icon(
+                    Icons.straighten_rounded,
+                    size: 14,
+                    color: colors.onSurfaceVariant,
+                  ),
                   const SizedBox(width: AppDimensions.spacingSm),
                   Expanded(
                     child: Text(
                       'Running route: ${totalKm.toStringAsFixed(1)} km • '
                       '+₹${(value.length * farePerStop).toStringAsFixed(0)} for ${value.length} stop${value.length == 1 ? '' : 's'}',
-                      style: AppTextStyles.bodySmall
-                          .copyWith(color: colors.onSurface, fontSize: 11),
+                      style: AppTextStyles.bodySmall.copyWith(
+                        color: colors.onSurface,
+                        fontSize: 11,
+                      ),
                     ),
                   ),
                 ],
@@ -315,6 +374,7 @@ class _StopRow extends StatefulWidget {
     required this.isLast,
     required this.onLabelChanged,
     required this.onRemove,
+    required this.onPickLocation,
     required this.onMoveUp,
     required this.onMoveDown,
   });
@@ -325,6 +385,7 @@ class _StopRow extends StatefulWidget {
   final bool isLast;
   final ValueChanged<String> onLabelChanged;
   final VoidCallback onRemove;
+  final VoidCallback onPickLocation;
   final VoidCallback? onMoveUp;
   final VoidCallback? onMoveDown;
 
@@ -383,10 +444,24 @@ class _StopRowState extends State<_StopRow> {
               decoration: InputDecoration(
                 isDense: true,
                 hintText: 'Stop ${widget.index + 1} address',
-                hintStyle: AppTextStyles.bodySmall
-                    .copyWith(color: colors.onSurfaceVariant, fontSize: 11),
+                hintStyle: AppTextStyles.bodySmall.copyWith(
+                  color: colors.onSurfaceVariant,
+                  fontSize: 11,
+                ),
                 border: InputBorder.none,
               ),
+            ),
+          ),
+          IconButton(
+            onPressed: widget.onPickLocation,
+            tooltip: widget.stop.hasPosition
+                ? 'Change stop location'
+                : 'Pick stop on map',
+            icon: Icon(
+              widget.stop.hasPosition
+                  ? Icons.location_on
+                  : Icons.add_location_alt_outlined,
+              color: colors.primary,
             ),
           ),
           const SizedBox(width: AppDimensions.spacingXs),
@@ -399,25 +474,22 @@ class _StopRowState extends State<_StopRow> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text(
-                  'OTP',
-                  style: AppTextStyles.labelSmall
-                      .copyWith(color: colors.info, fontSize: 8),
-                ),
-                Text(
-                  widget.stop.otp,
-                  style: AppTextStyles.labelMedium.copyWith(
-                    color: colors.info,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: 1.5,
-                  ),
+                Icon(
+                  widget.stop.hasPosition
+                      ? Icons.check_circle
+                      : Icons.location_searching,
+                  size: 15,
+                  color: widget.stop.hasPosition ? colors.success : colors.info,
                 ),
               ],
             ),
           ),
           PopupMenuButton<String>(
-            icon: Icon(Icons.more_vert_rounded,
-                size: AppDimensions.iconSm, color: colors.onSurfaceVariant),
+            icon: Icon(
+              Icons.more_vert_rounded,
+              size: AppDimensions.iconSm,
+              color: colors.onSurfaceVariant,
+            ),
             onSelected: (action) {
               if (action == 'up') widget.onMoveUp?.call();
               if (action == 'down') widget.onMoveDown?.call();

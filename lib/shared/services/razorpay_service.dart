@@ -1,5 +1,4 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:razorpay_flutter/razorpay_flutter.dart';
 
 import '../../config/env/env_config.dart';
@@ -12,6 +11,8 @@ class RazorpayService {
   Function(PaymentSuccessResponse)? _onSuccess;
   Function(PaymentFailureResponse)? _onError;
   Function(ExternalWalletResponse)? _onExternalWallet;
+  final FirebaseFunctions _functions =
+      FirebaseFunctions.instanceFor(region: EnvConfig.functionsRegion);
 
   RazorpayService() {
     _razorpay = Razorpay();
@@ -89,24 +90,36 @@ class RazorpayService {
     required String signature,
     required String bookingId,
   }) async {
-    // No Cloud Functions available (Blaze-only). Record the payment locally in
-    // Firestore so it is tracked, and treat the Razorpay success callback as
-    // the source of truth. Signature verification requires a server and is
-    // intentionally skipped in this Firestore-only deployment.
-    final uid = FirebaseAuth.instance.currentUser?.uid;
-    if (uid == null) return false;
     try {
-      await FirebaseFirestore.instance.collection('payments').add({
-        'userId': uid,
-        'bookingId': bookingId,
+      final result = await _functions.httpsCallable('verifyPayment').call({
         'orderId': orderId,
         'paymentId': paymentId,
         'signature': signature,
-        'status': 'PAID',
-        'verified': true,
-        'createdAt': FieldValue.serverTimestamp(),
+        'bookingId': bookingId,
       });
-      return true;
+      final data = Map<String, dynamic>.from(result.data as Map);
+      return data['paid'] == true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<Map<String, dynamic>> createOrder(String bookingId) async {
+    final result = await _functions.httpsCallable('createRazorpayOrder').call({
+      'bookingId': bookingId,
+    });
+    return Map<String, dynamic>.from(result.data as Map);
+  }
+
+  Future<Map<String, dynamic>> createWalletOrder(int amount) async {
+    final result = await _functions.httpsCallable('createWalletTopupOrder').call({'amount': amount});
+    return Map<String, dynamic>.from(result.data as Map);
+  }
+
+  Future<bool> verifyWalletPayment({required String orderId, required String paymentId, required String signature}) async {
+    try {
+      final result = await _functions.httpsCallable('verifyWalletTopup').call({'orderId': orderId, 'paymentId': paymentId, 'signature': signature});
+      return (result.data as Map)['paid'] == true;
     } catch (_) {
       return false;
     }
