@@ -7,6 +7,26 @@ on:
   workflow_dispatch:
 
 jobs:
+  functions:
+    name: Functions build + tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: functions/package-lock.json
+      - name: Install dependencies
+        working-directory: functions
+        run: npm ci
+      - name: Build
+        working-directory: functions
+        run: npm run build
+      - name: Test
+        working-directory: functions
+        run: npm test
+
   android:
     name: Android AAB + APK
     runs-on: ubuntu-latest
