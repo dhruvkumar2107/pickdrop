@@ -3,6 +3,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:speech_to_text/speech_to_text.dart';
 
 import '../../../../../../config/router/route_names.dart';
 import '../../../../../../core/constants/colors.dart';
@@ -44,6 +45,9 @@ class _PickupDropSelectionPageState extends ConsumerState<PickupDropSelectionPag
   double? _dropLat;
   double? _dropLng;
 
+  final SpeechToText _speech = SpeechToText();
+  bool _speechEnabled = false;
+
   @override
   void initState() {
     super.initState();
@@ -55,11 +59,24 @@ class _PickupDropSelectionPageState extends ConsumerState<PickupDropSelectionPag
     _dropLabel = widget.initialDropLabel;
     _dropLat = widget.initialDropLat;
     _dropLng = widget.initialDropLng;
+    _initSpeech();
+  }
+
+  Future<void> _initSpeech() async {
+    _speechEnabled = await _speech.initialize(
+      onError: (error) => AppToast.error(context, 'Speech recognition error: $error'),
+      onStatus: (status) {
+        if (status == 'done' || status == 'notListening') {
+          // listening stopped
+        }
+      },
+    );
   }
 
   @override
   void dispose() {
     _pageController.dispose();
+    _speech.cancel();
     super.dispose();
   }
 
@@ -87,6 +104,56 @@ class _PickupDropSelectionPageState extends ConsumerState<PickupDropSelectionPag
       'pickupLat=$_pickupLat&pickupLng=$_pickupLng&pickupAddress=${Uri.encodeComponent(_pickupLabel!)}'
       '&dropLat=$_dropLat&dropLng=$_dropLng&dropAddress=${Uri.encodeComponent(_dropLabel!)}',
     );
+  }
+
+  Future<void> _startVoiceSearch(bool isPickup) async {
+    if (!_speechEnabled) {
+      AppToast.warning(context, 'Speech recognition not available');
+      return;
+    }
+    String recognizedText = '';
+    await _speech.listen(
+      onResult: (result) {
+        recognizedText = result.recognizedWords;
+      },
+      listenOptions: SpeechListenOptions(
+        listenFor: const Duration(seconds: 15),
+        pauseFor: const Duration(seconds: 5),
+        localeId: 'en_IN',
+      ),
+    );
+    await Future.delayed(const Duration(seconds: 16));
+    if (!mounted) return;
+    if (recognizedText.trim().isNotEmpty) {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Voice Search Result'),
+          content: Text('Did you say: "$recognizedText"?'),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('No')),
+            FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Use this')),
+          ],
+        ),
+      );
+      if (confirmed == true) {
+        if (!mounted) return;
+        setState(() {
+          if (isPickup) {
+            _pickupLabel = recognizedText;
+            _pickupLat = null;
+            _pickupLng = null;
+          } else {
+            _dropLabel = recognizedText;
+            _dropLat = null;
+            _dropLng = null;
+          }
+        });
+        AppToast.success(context, 'Location set. Tap map to pin exact location.');
+      }
+    } else {
+      AppToast.info(context, 'No speech detected. Try again.');
+    }
   }
 
   Future<void> _pickLocation(bool isPickup) async {
@@ -389,10 +456,7 @@ class _PickupDropSelectionPageState extends ConsumerState<PickupDropSelectionPag
                   variant: PDCardVariant.outlined,
                   padding: EdgeInsets.all(DesignTokens.spacingMd),
                   radius: DesignTokens.radiusLg,
-                  onTap: () {
-                    // Voice search
-                    AppToast.info(context, 'Voice search coming soon');
-                  },
+                  onTap: () => _startVoiceSearch(true),
                   child: Column(
                     children: [
                       Container(
