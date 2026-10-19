@@ -1,3 +1,5 @@
+﻿import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -21,11 +23,59 @@ class CustomerProfilePage extends ConsumerStatefulWidget {
 }
 
 class _CustomerProfilePageState extends ConsumerState<CustomerProfilePage> {
-  static const String _name = 'Aarav Sharma';
-  static const String _phone = '+91 98765 43210';
-  static const int _totalTrips = 48;
-  static const int _savedAddresses = 4;
-  static const double _rating = 4.8;
+  String _name = 'PickDrop customer';
+  String _phone = '';
+  int _totalTrips = 0;
+  int _savedAddresses = 0;
+  double _walletBalance = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadProfile();
+  }
+
+  Future<void> _loadProfile() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+    final db = FirebaseFirestore.instance;
+    try {
+      final profile = await db.collection('users').doc(user.uid).get();
+      final trips = await db
+          .collection('bookings')
+          .where('customerId', isEqualTo: user.uid)
+          .where('status', isEqualTo: 'DELIVERED')
+          .count()
+          .get();
+      final addresses = await db
+          .collection('savedAddresses')
+          .where('userId', isEqualTo: user.uid)
+          .count()
+          .get();
+      final wallet = await db.collection('wallets').doc(user.uid).get();
+      if (!mounted) return;
+      final data = profile.data() ?? <String, dynamic>{};
+      setState(() {
+        _name = (data['displayName'] as String?)?.trim().isNotEmpty == true
+            ? (data['displayName'] as String).trim()
+            : (user.displayName?.trim().isNotEmpty == true
+                ? user.displayName!.trim()
+                : 'PickDrop customer');
+        _phone = (data['phoneNumber'] as String?) ?? user.phoneNumber ?? '';
+        _totalTrips = trips.count ?? 0;
+        _savedAddresses = addresses.count ?? 0;
+        _walletBalance = (wallet.data()?['balance'] as num?)?.toDouble() ?? 0;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _name = user.displayName?.trim().isNotEmpty == true
+            ? user.displayName!.trim()
+            : 'PickDrop customer';
+        _phone = user.phoneNumber ?? '';
+      });
+    }
+  }
 
   Future<void> _logout() async {
     final confirmed = await AppDialog.showConfirmation(
@@ -36,7 +86,49 @@ class _CustomerProfilePageState extends ConsumerState<CustomerProfilePage> {
       isDestructive: true,
     );
     if (!mounted || confirmed != true) return;
+    await FirebaseAuth.instance.signOut();
     context.go(RouteNames.splash);
+  }
+
+  Future<void> _editProfile() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+    final controller = TextEditingController(text: _name);
+    final name = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Edit your name'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          maxLength: 80,
+          textCapitalization: TextCapitalization.words,
+          decoration: const InputDecoration(labelText: 'Name'),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('Cancel')),
+          FilledButton(
+            onPressed: () {
+              final value = controller.text.trim();
+              if (value.isNotEmpty) Navigator.pop(dialogContext, value);
+            },
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (name == null || !mounted) return;
+    try {
+      await FirebaseFirestore.instance.collection('users').doc(user.uid).set(
+        {'displayName': name, 'updatedAt': FieldValue.serverTimestamp()},
+        SetOptions(merge: true),
+      );
+      await user.updateDisplayName(name);
+      if (mounted) setState(() => _name = name);
+    } catch (_) {
+      if (mounted) _showComingSoon('Could not update your profile. Please try again.');
+    }
   }
 
   void _toggleTheme() {
@@ -91,7 +183,7 @@ class _CustomerProfilePageState extends ConsumerState<CustomerProfilePage> {
                   _SettingsItem(
                     icon: Icons.person_outline_rounded,
                     title: 'Personal Info',
-                    onTap: () => _showComingSoon('Personal info coming soon'),
+                    onTap: _editProfile,
                   ),
                   _SettingsItem(
                     icon: Icons.bookmark_outline_rounded,
@@ -274,7 +366,7 @@ class _CustomerProfilePageState extends ConsumerState<CustomerProfilePage> {
                 text: AppStrings.edit,
                 textColor: Colors.white,
                 fontWeight: FontWeight.w600,
-                onPressed: () => _showComingSoon('Edit profile coming soon'),
+                onPressed: _editProfile,
               ),
             ],
           ),
@@ -375,8 +467,8 @@ class _CustomerProfilePageState extends ConsumerState<CustomerProfilePage> {
           Expanded(
             child: _StatItem(
               icon: Icons.star_rounded,
-              value: _rating.toStringAsFixed(1),
-              label: 'Rating',
+              value: '₹${_walletBalance.toStringAsFixed(0)}',
+              label: 'Wallet',
               colors: colors,
             ),
           ),

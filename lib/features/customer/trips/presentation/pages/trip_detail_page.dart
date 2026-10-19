@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 import '../../../../../core/constants/colors.dart';
 import '../../../../../core/constants/dimensions.dart';
@@ -11,13 +12,60 @@ import '../../../booking/presentation/widgets/insurance_claim_sheet.dart';
 import '../../../help/presentation/widgets/instant_refund_card.dart';
 import '../../../tracking/presentation/widgets/proof_of_delivery_sheet.dart';
 
-class TripDetailPage extends StatelessWidget {
-  const TripDetailPage({super.key, this.isInsured = true});
+class TripDetailPage extends StatefulWidget {
+  const TripDetailPage({super.key, this.isInsured = true, this.bookingId});
 
   final bool isInsured;
+  final String? bookingId;
 
   @override
+  State<TripDetailPage> createState() => _TripDetailPageState();
+}
+
+class _TripDetailPageState extends State<TripDetailPage> {
+  @override
   Widget build(BuildContext context) {
+    final id = widget.bookingId;
+    if (id == null || id.isEmpty) {
+      return const Scaffold(
+        body: Center(
+          child: Text(
+            'Trip details are unavailable. Open a trip from your history.',
+          ),
+        ),
+      );
+    }
+    return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+      stream: FirebaseFirestore.instance
+          .collection('bookings')
+          .doc(id)
+          .snapshots(),
+      builder: (context, snapshot) {
+        if (snapshot.hasError) {
+          return const Scaffold(
+            body: Center(child: Text('Could not load trip details.')),
+          );
+        }
+        if (!snapshot.hasData) {
+          return const Scaffold(
+            body: Center(child: CircularProgressIndicator()),
+          );
+        }
+        final data = snapshot.data!.data();
+        if (data == null) {
+          return const Scaffold(body: Center(child: Text('Trip not found.')));
+        }
+        return _buildDetails(context, data);
+      },
+    );
+  }
+
+  Widget _buildDetails(BuildContext context, Map<String, dynamic> data) {
+    final bookingId = widget.bookingId!;
+    final fare = Map<String, dynamic>.from(data['fareBreakdown'] as Map? ?? {});
+    final pickup = Map<String, dynamic>.from(data['pickup'] as Map? ?? {});
+    final drop = Map<String, dynamic>.from(data['drop'] as Map? ?? {});
+    final total = (fare['total'] as num? ?? 0).toDouble();
     final safeTop = MediaQuery.of(context).padding.top;
 
     return Scaffold(
@@ -37,18 +85,24 @@ class TripDetailPage extends StatelessWidget {
                   children: [
                     IconButton(
                       onPressed: () => Navigator.of(context).maybePop(),
-                      icon: const Icon(Icons.arrow_back_rounded,
-                          color: Colors.white),
+                      icon: const Icon(
+                        Icons.arrow_back_rounded,
+                        color: Colors.white,
+                      ),
                     ),
                     const SizedBox(width: AppDimensions.spacingXs),
                     Expanded(
                       child: Text(
                         'Trip Details',
-                        style:
-                            AppTextStyles.headlineSmall.copyWith(color: Colors.white),
+                        style: AppTextStyles.headlineSmall.copyWith(
+                          color: Colors.white,
+                        ),
                       ),
                     ),
-                    const StatusChip(label: 'DELIVERED', status: AppChipStatus.success),
+                    StatusChip.fromStatus(
+                      (data['status'] ?? 'UNKNOWN').toString(),
+                      dense: true,
+                    ),
                   ],
                 ),
               ),
@@ -68,31 +122,39 @@ class TripDetailPage extends StatelessWidget {
                         Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                            Text('Trip #PD1004', style: AppTextStyles.titleMedium),
-                            Text('₹520',
-                                style: AppTextStyles.priceMedium
-                                    .copyWith(color: AppColors.primary)),
+                            Text(
+                              'Trip #${bookingId.substring(0, bookingId.length > 8 ? 8 : bookingId.length)}',
+                              style: AppTextStyles.titleMedium,
+                            ),
+                            Text(
+                              '₹${total.toStringAsFixed(0)}',
+                              style: AppTextStyles.priceMedium.copyWith(
+                                color: AppColors.primary,
+                              ),
+                            ),
                           ],
                         ),
                         const SizedBox(height: AppDimensions.spacingXs),
                         Text(
-                          '28 Sep 2026 • 11:45',
-                          style: AppTextStyles.bodySmall
-                              .copyWith(color: AppColors.onSurfaceVariant),
+                          _formatDate(data['createdAt']),
+                          style: AppTextStyles.bodySmall.copyWith(
+                            color: AppColors.onSurfaceVariant,
+                          ),
                         ),
                         const SizedBox(height: AppDimensions.spacingLg),
                         _TripRow(
                           icon: Icons.trip_origin_rounded,
                           color: AppColors.primary,
                           label: 'Pickup',
-                          address: '55 Electronic City Phase 1, Bangalore',
+                          address: (pickup['address'] ?? 'Pickup').toString(),
                         ),
                         const SizedBox(height: AppDimensions.spacingMd),
                         _TripRow(
                           icon: Icons.location_on_rounded,
                           color: const Color(0xFF16A34A),
                           label: 'Drop',
-                          address: '9 HSR Layout Sector 2, Bangalore',
+                          address: (drop['address'] ?? 'Destination')
+                              .toString(),
                         ),
                       ],
                     ),
@@ -100,25 +162,58 @@ class TripDetailPage extends StatelessWidget {
                   const SizedBox(height: AppDimensions.spacingLg),
                   GlassCard(
                     child: Column(
-                      children: const [
-                        _InfoRow(label: 'Vehicle', value: 'Pickup'),
-                        _InfoRow(label: 'Distance', value: '12.4 km'),
-                        _InfoRow(label: 'Duration', value: '38 min'),
-                        _InfoRow(label: 'Payment', value: 'UPI'),
-                        _InfoRow(label: 'Status', value: 'Delivered'),
+                      children: [
+                        _InfoRow(
+                          label: 'Vehicle',
+                          value:
+                              (data['vehicleTypeId'] ??
+                                      data['vehicleType'] ??
+                                      'Delivery')
+                                  .toString(),
+                        ),
+                        _InfoRow(
+                          label: 'Distance',
+                          value:
+                              '${((data['distanceKm'] as num?) ?? 0).toStringAsFixed(1)} km',
+                        ),
+                        _InfoRow(
+                          label: 'Duration',
+                          value: '${data['estimatedDurationMin'] ?? '—'} min',
+                        ),
+                        _InfoRow(
+                          label: 'Payment',
+                          value: (data['paymentMethod'] ?? '—').toString(),
+                        ),
+                        _InfoRow(
+                          label: 'Status',
+                          value: (data['status'] ?? '—').toString(),
+                        ),
                       ],
                     ),
                   ),
                   const SizedBox(height: AppDimensions.spacingLg),
                   GlassCard(
                     child: Column(
-                      children: const [
-                        _InfoRow(label: 'Base fare', value: '₹120'),
-                        _InfoRow(label: 'Distance fare', value: '₹240'),
-                        _InfoRow(label: 'Time fare', value: '₹90'),
-                        _InfoRow(label: 'GST (5%)', value: '₹23'),
+                      children: [
+                        _InfoRow(
+                          label: 'Base fare',
+                          value: _money(fare['baseFare']),
+                        ),
+                        _InfoRow(
+                          label: 'Distance fare',
+                          value: _money(fare['distanceFare']),
+                        ),
+                        _InfoRow(
+                          label: 'Time fare',
+                          value: _money(fare['timeFare']),
+                        ),
+                        _InfoRow(label: 'GST', value: _money(fare['gst'])),
                         Divider(height: AppDimensions.spacingLg),
-                        _InfoRow(label: 'Total', value: '₹473', bold: true),
+                        _InfoRow(
+                          label: 'Total',
+                          value: _money(fare['total']),
+                          bold: true,
+                        ),
                       ],
                     ),
                   ),
@@ -132,7 +227,7 @@ class TripDetailPage extends StatelessWidget {
                           subtitle: 'Photo & receiver acknowledgment',
                           onTap: () => ProofOfDeliverySheet.show(
                             context,
-                            bookingId: 'PD1004',
+                            bookingId: bookingId,
                             isPickup: false,
                             onProofCompleted: () => AppToast.success(
                               context,
@@ -140,7 +235,7 @@ class TripDetailPage extends StatelessWidget {
                             ),
                           ),
                         ),
-                        if (isInsured) ...[
+                        if (data['transitInsurance'] == true) ...[
                           const Divider(height: AppDimensions.spacingMd),
                           _ActionRow(
                             icon: Icons.health_and_safety_rounded,
@@ -148,8 +243,9 @@ class TripDetailPage extends StatelessWidget {
                             subtitle: 'File or track your transit claim',
                             onTap: () => InsuranceClaimSheet.show(
                               context,
-                              bookingId: 'PD1004',
-                              goodsValue: 12000,
+                              bookingId: bookingId,
+                              goodsValue:
+                                  (data['goodsValue'] as num?)?.toDouble() ?? 0,
                             ),
                           ),
                         ],
@@ -160,7 +256,7 @@ class TripDetailPage extends StatelessWidget {
                           subtitle: 'Instant refund to your wallet',
                           onTap: () => InstantRefundCard.show(
                             context,
-                            bookingId: 'PD1004',
+                            bookingId: bookingId,
                           ),
                         ),
                       ],
@@ -173,6 +269,14 @@ class TripDetailPage extends StatelessWidget {
         ],
       ),
     ).animate().fadeIn(duration: 300.ms);
+  }
+
+  String _money(dynamic value) =>
+      '₹${((value as num?) ?? 0).toStringAsFixed(2)}';
+  String _formatDate(dynamic value) {
+    final date = value is Timestamp ? value.toDate().toLocal() : null;
+    if (date == null) return 'Date unavailable';
+    return '${date.day}/${date.month}/${date.year} • ${date.hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')}';
   }
 }
 
@@ -199,9 +303,12 @@ class _TripRow extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(label,
-                  style: AppTextStyles.labelSmall
-                      .copyWith(color: AppColors.onSurfaceVariant)),
+              Text(
+                label,
+                style: AppTextStyles.labelSmall.copyWith(
+                  color: AppColors.onSurfaceVariant,
+                ),
+              ),
               Text(address, style: AppTextStyles.bodyMedium),
             ],
           ),
@@ -233,7 +340,9 @@ class _ActionRow extends StatelessWidget {
       child: InkWell(
         onTap: onTap,
         child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: AppDimensions.spacingXs),
+          padding: const EdgeInsets.symmetric(
+            vertical: AppDimensions.spacingXs,
+          ),
           child: Row(
             children: [
               Container(
@@ -244,7 +353,11 @@ class _ActionRow extends StatelessWidget {
                   color: colors.primaryContainer,
                   shape: BoxShape.circle,
                 ),
-                child: Icon(icon, size: AppDimensions.iconSm, color: colors.primary),
+                child: Icon(
+                  icon,
+                  size: AppDimensions.iconSm,
+                  color: colors.primary,
+                ),
               ),
               const SizedBox(width: AppDimensions.spacingMd),
               Expanded(
@@ -254,8 +367,9 @@ class _ActionRow extends StatelessWidget {
                     Text(label, style: AppTextStyles.labelLarge),
                     Text(
                       subtitle,
-                      style: AppTextStyles.labelSmall
-                          .copyWith(color: colors.onSurfaceVariant),
+                      style: AppTextStyles.labelSmall.copyWith(
+                        color: colors.onSurfaceVariant,
+                      ),
                     ),
                   ],
                 ),
@@ -286,9 +400,12 @@ class _InfoRow extends StatelessWidget {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(label,
-              style: AppTextStyles.bodySmall
-                  .copyWith(color: AppColors.onSurfaceVariant)),
+          Text(
+            label,
+            style: AppTextStyles.bodySmall.copyWith(
+              color: AppColors.onSurfaceVariant,
+            ),
+          ),
           Text(value, style: style),
         ],
       ),

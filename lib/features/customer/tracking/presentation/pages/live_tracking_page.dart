@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
@@ -61,10 +62,13 @@ class _LiveTrackingPageState extends State<LiveTrackingPage> {
   static const int _lastStep = 6;
   static const String _defaultPickup = '123 MG Road, Bengaluru 560001';
   static const String _defaultDrop = '456 Koramangala, Bengaluru 560034';
-  LatLng get _pickupPoint => LatLng(widget.pickupLat ?? 12.9716, widget.pickupLng ?? 77.5946);
-  LatLng get _dropPoint => LatLng(widget.dropLat ?? 12.9352, widget.dropLng ?? 77.6146);
+  LatLng get _pickupPoint =>
+      LatLng(widget.pickupLat ?? 12.9716, widget.pickupLng ?? 77.5946);
+  LatLng get _dropPoint =>
+      LatLng(widget.dropLat ?? 12.9352, widget.dropLng ?? 77.6146);
   LatLng? _driverPoint;
   StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _bookingSub;
+  StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _secretsSub;
   StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _driverSub;
   int _step = 0;
   ProactiveAlert? _proactiveAlert;
@@ -72,12 +76,19 @@ class _LiveTrackingPageState extends State<LiveTrackingPage> {
   String _driverName = 'Your driver';
   String _driverId = '';
   String get _driverInitials {
-    final parts = _driverName.trim().split(RegExp(r'\s+')).where((part) => part.isNotEmpty);
+    final parts = _driverName
+        .trim()
+        .split(RegExp(r'\s+'))
+        .where((part) => part.isNotEmpty);
     return parts.take(2).map((part) => part[0].toUpperCase()).join();
   }
+
   String _vehicleDetails = '';
   String _driverPhone = '';
   String _pickupOtp = '';
+  String _dropOtp = '';
+  List<Map<String, dynamic>> _intermediateStops = [];
+  Map<String, String> _stopOtps = {};
   bool _completedRoute = false;
 
   @override
@@ -85,16 +96,57 @@ class _LiveTrackingPageState extends State<LiveTrackingPage> {
     super.initState();
     final bookingId = widget.bookingId;
     if (bookingId != null && bookingId.isNotEmpty) {
-      _bookingSub = FirebaseFirestore.instance.collection('bookings').doc(bookingId)
-          .snapshots().listen(_onBookingSnapshot, onError: (Object error) {
-            if (mounted) AppToast.error(context, 'Could not load this delivery. Check your connection.');
-          });
+      _bookingSub = FirebaseFirestore.instance
+          .collection('bookings')
+          .doc(bookingId)
+          .snapshots()
+          .listen(
+            _onBookingSnapshot,
+            onError: (Object error) {
+              if (mounted) {
+                AppToast.error(
+                  context,
+                  'Could not load this delivery. Check your connection.',
+                );
+              }
+            },
+          );
+      _secretsSub = FirebaseFirestore.instance
+          .collection('bookingSecrets')
+          .doc(bookingId)
+          .snapshots()
+          .listen(
+            (secretDoc) {
+              final secrets = secretDoc.data();
+              if (!mounted || secrets == null) return;
+              final stopCodes = secrets['intermediateStopOtps'];
+              setState(() {
+                _pickupOtp = (secrets['pickupOtp'] as String?) ?? '';
+                _dropOtp = (secrets['dropOtp'] as String?) ?? '';
+                _stopOtps = stopCodes is Map
+                    ? stopCodes.map(
+                        (key, value) =>
+                            MapEntry(key.toString(), value.toString()),
+                      )
+                    : {};
+              });
+            },
+            onError: (Object error) {
+              if (mounted) {
+                AppToast.error(
+                  context,
+                  'Could not load delivery verification codes.',
+                );
+              }
+            },
+          );
     }
   }
 
   @override
   void dispose() {
     _bookingSub?.cancel();
+    _secretsSub?.cancel();
     _driverSub?.cancel();
     LiveActivityNotification.instance.clear();
     super.dispose();
@@ -104,11 +156,22 @@ class _LiveTrackingPageState extends State<LiveTrackingPage> {
     final data = snapshot.data();
     if (data == null || !mounted) return;
     final status = (data['status'] as String? ?? '').toUpperCase();
-    final pickup = data['pickup'];
+    final pickupData = data['pickup'];
+    final dropData = data['drop'];
+    final stops = (data['intermediateStops'] as List<dynamic>? ?? [])
+        .whereType<Map>()
+        .map((item) => Map<String, dynamic>.from(item))
+        .toList();
     final driverId = data['driverId'] as String?;
     setState(() {
       _bookingStatus = status;
-      _pickupOtp = pickup is Map ? (pickup['otp'] as String? ?? '') : '';
+      _pickupOtp = pickupData is Map
+          ? (pickupData['otp'] as String? ?? _pickupOtp)
+          : _pickupOtp;
+      _dropOtp = dropData is Map
+          ? (dropData['otp'] as String? ?? _dropOtp)
+          : _dropOtp;
+      _intermediateStops = stops;
       if (driverId != null && driverId.isNotEmpty) _driverId = driverId;
       _step = switch (status) {
         'DRIVER_ASSIGNED' => 0,
@@ -118,26 +181,38 @@ class _LiveTrackingPageState extends State<LiveTrackingPage> {
       };
     });
     if (driverId != null && driverId.isNotEmpty && _driverSub == null) {
-      _driverSub = FirebaseFirestore.instance.collection('drivers').doc(driverId)
-          .snapshots().listen((driverDoc) {
+      _driverSub = FirebaseFirestore.instance
+          .collection('drivers')
+          .doc(driverId)
+          .snapshots()
+          .listen((driverDoc) {
             final driver = driverDoc.data();
             if (!mounted || driver == null) return;
             final loc = driver['currentLocation'];
             setState(() {
-              if (loc is GeoPoint) _driverPoint = LatLng(loc.latitude, loc.longitude);
-              _vehicleDetails = [driver['vehicleModel'], driver['vehicleNumber']]
-                  .whereType<String>().where((value) => value.isNotEmpty).join(' • ');
+              if (loc is GeoPoint)
+                _driverPoint = LatLng(loc.latitude, loc.longitude);
+              _vehicleDetails =
+                  [driver['vehicleModel'], driver['vehicleNumber']]
+                      .whereType<String>()
+                      .where((value) => value.isNotEmpty)
+                      .join(' • ');
             });
-            FirebaseFirestore.instance.collection('users').doc(driverId).get().then((userDoc) {
-              if (!mounted) return;
-              final user = userDoc.data();
-              if (user != null) {
-                setState(() {
-                  _driverName = user['displayName'] as String? ?? 'Your driver';
-                  _driverPhone = user['phoneNumber'] as String? ?? '';
+            FirebaseFirestore.instance
+                .collection('users')
+                .doc(driverId)
+                .get()
+                .then((userDoc) {
+                  if (!mounted) return;
+                  final user = userDoc.data();
+                  if (user != null) {
+                    setState(() {
+                      _driverName =
+                          user['displayName'] as String? ?? 'Your driver';
+                      _driverPhone = user['phoneNumber'] as String? ?? '';
+                    });
+                  }
                 });
-              }
-            });
           });
     }
     if (status == 'DELIVERED' && !_completedRoute) {
@@ -161,16 +236,21 @@ class _LiveTrackingPageState extends State<LiveTrackingPage> {
 
     final breakdown = booking?['fareBreakdown'];
     final savedFare = breakdown is Map ? breakdown['total'] : null;
-    final fare = ((savedFare as num?)?.toDouble() ?? widget.fare ?? 0).toStringAsFixed(0);
+    final fare = ((savedFare as num?)?.toDouble() ?? widget.fare ?? 0)
+        .toStringAsFixed(0);
     final driver = Uri.encodeComponent(_driverName);
     final payment = Uri.encodeComponent(widget.paymentMethod ?? 'cod');
 
-    context.go('${RouteNames.tripComplete}?fare=$fare&driver=$driver&paymentMethod=$payment&bookingId=${Uri.encodeComponent(widget.bookingId ?? '')}&driverId=${Uri.encodeComponent(_driverId)}');
+    context.go(
+      '${RouteNames.tripComplete}?fare=$fare&driver=$driver&paymentMethod=$payment&bookingId=${Uri.encodeComponent(widget.bookingId ?? '')}&driverId=${Uri.encodeComponent(_driverId)}',
+    );
   }
 
   String get _status {
-    if (_bookingStatus == 'PICKED_UP' || _bookingStatus == 'IN_TRANSIT') return AppConstants.statusInTransit;
-    if (_bookingStatus == 'DRIVER_ASSIGNED') return AppConstants.statusDriverAssigned;
+    if (_bookingStatus == 'PICKED_UP' || _bookingStatus == 'IN_TRANSIT')
+      return AppConstants.statusInTransit;
+    if (_bookingStatus == 'DRIVER_ASSIGNED')
+      return AppConstants.statusDriverAssigned;
     return 'Searching';
   }
 
@@ -193,7 +273,9 @@ class _LiveTrackingPageState extends State<LiveTrackingPage> {
   double get _etaMinutes {
     final driver = _driverPoint;
     if (driver == null) return 0;
-    final target = _status == AppConstants.statusInTransit ? _dropPoint : _pickupPoint;
+    final target = _status == AppConstants.statusInTransit
+        ? _dropPoint
+        : _pickupPoint;
     final metres = AppHelpers.calculateDistance(
       driver.latitude,
       driver.longitude,
@@ -210,8 +292,21 @@ class _LiveTrackingPageState extends State<LiveTrackingPage> {
   String get _pickupLabel => widget.pickupAddress ?? _defaultPickup;
   String get _dropLabel => widget.dropAddress ?? _defaultDrop;
 
-  void _shareTrip() async {
-    final shareText = '''
+  Future<void> _shareTrip() async {
+    final bookingId = widget.bookingId;
+    if (bookingId == null || bookingId.isEmpty) {
+      AppToast.error(context, 'This trip cannot be shared right now.');
+      return;
+    }
+    try {
+      final response = await FirebaseFunctions.instanceFor(
+        region: EnvConfig.functionsRegion,
+      )
+          .httpsCallable('createPublicTrackingLink')
+          .call({'bookingId': bookingId});
+      final token = Map<String, dynamic>.from(response.data as Map)['token'] as String;
+      final trackingUrl = '${EnvConfig.trackingBaseUrl}/track/$token';
+      final shareText = '''
 🚚 PickDrop Trip Tracking
 
 Driver: $_driverName
@@ -221,15 +316,14 @@ Drop: $_dropLabel
 Status: $_statusMessage
 ETA: $_etaLabel
 
-Track live: ${EnvConfig.trackingBaseUrl}/track/${widget.bookingId ?? ''}
+Track live: $trackingUrl
 ''';
-
-    await SharePlus.instance.share(
-      ShareParams(
-        text: shareText,
-        subject: 'Share my PickDrop trip',
-      ),
-    );
+      await SharePlus.instance.share(
+        ShareParams(text: shareText, subject: 'Share my PickDrop trip'),
+      );
+    } catch (_) {
+      if (mounted) AppToast.error(context, 'Could not create a tracking link. Try again.');
+    }
   }
 
   void _callDriver() {
@@ -268,7 +362,9 @@ Track live: ${EnvConfig.trackingBaseUrl}/track/${widget.bookingId ?? ''}
         if (!mounted) return;
         AppToast.success(
           context,
-          isPickup ? 'Pickup proof verified successfully' : 'Delivery proof recorded successfully',
+          isPickup
+              ? 'Pickup proof verified successfully'
+              : 'Delivery proof recorded successfully',
         );
       },
     );
@@ -289,7 +385,11 @@ Track live: ${EnvConfig.trackingBaseUrl}/track/${widget.bookingId ?? ''}
         await BookingRemoteDataSource().cancelBooking(widget.bookingId ?? '');
         if (mounted) context.go(RouteNames.customerHome);
       } catch (_) {
-        if (mounted) AppToast.error(context, 'Could not cancel. Check your connection and try again.');
+        if (mounted)
+          AppToast.error(
+            context,
+            'Could not cancel. Check your connection and try again.',
+          );
       }
     }
   }
@@ -299,9 +399,7 @@ Track live: ${EnvConfig.trackingBaseUrl}/track/${widget.bookingId ?? ''}
       Marker(
         markerId: const MarkerId('pickup'),
         position: _pickupPoint,
-        icon: BitmapDescriptor.defaultMarkerWithHue(
-          BitmapDescriptor.hueGreen,
-        ),
+        icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen),
         infoWindow: InfoWindow(title: 'Pickup', snippet: _pickupLabel),
       ),
       Marker(
@@ -310,14 +408,15 @@ Track live: ${EnvConfig.trackingBaseUrl}/track/${widget.bookingId ?? ''}
         icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed),
         infoWindow: InfoWindow(title: 'Drop', snippet: _dropLabel),
       ),
-      if (_driverPoint != null) Marker(
-        markerId: const MarkerId('driver'),
-        position: _driverPoint!,
-        icon: BitmapDescriptor.defaultMarkerWithHue(
-          BitmapDescriptor.hueOrange,
+      if (_driverPoint != null)
+        Marker(
+          markerId: const MarkerId('driver'),
+          position: _driverPoint!,
+          icon: BitmapDescriptor.defaultMarkerWithHue(
+            BitmapDescriptor.hueOrange,
+          ),
+          infoWindow: const InfoWindow(title: 'Driver'),
         ),
-        infoWindow: const InfoWindow(title: 'Driver'),
-      ),
     };
   }
 
@@ -363,8 +462,8 @@ Track live: ${EnvConfig.trackingBaseUrl}/track/${widget.bookingId ?? ''}
               color: done
                   ? colors.success
                   : current
-                      ? colors.primary
-                      : colors.surfaceVariant,
+                  ? colors.primary
+                  : colors.surfaceVariant,
             ),
             child: done
                 ? Icon(
@@ -375,7 +474,9 @@ Track live: ${EnvConfig.trackingBaseUrl}/track/${widget.bookingId ?? ''}
                 : Text(
                     '${index + 1}',
                     style: TokenTextStyles.labelSmall(
-                      color: current ? colors.onPrimary : colors.onSurfaceVariant,
+                      color: current
+                          ? colors.onPrimary
+                          : colors.onSurfaceVariant,
                     ),
                   ),
           ),
@@ -538,10 +639,7 @@ Track live: ${EnvConfig.trackingBaseUrl}/track/${widget.bookingId ?? ''}
             ),
           ),
           SizedBox(width: DesignTokens.spacingMd),
-          StatusChip.fromStatus(
-            _status,
-            label: _statusMessage,
-          ),
+          StatusChip.fromStatus(_status, label: _statusMessage),
           const Spacer(),
           PDCard(
             variant: PDCardVariant.glass,
@@ -604,7 +702,9 @@ Track live: ${EnvConfig.trackingBaseUrl}/track/${widget.bookingId ?? ''}
                         _driverName,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: TokenTextStyles.titleMedium(color: colors.onSurface),
+                        style: TokenTextStyles.titleMedium(
+                          color: colors.onSurface,
+                        ),
                       ),
                     ),
                     SizedBox(width: DesignTokens.spacingXs),
@@ -615,7 +715,9 @@ Track live: ${EnvConfig.trackingBaseUrl}/track/${widget.bookingId ?? ''}
                       ),
                       decoration: BoxDecoration(
                         color: colors.successLight,
-                        borderRadius: BorderRadius.circular(DesignTokens.radiusFull),
+                        borderRadius: BorderRadius.circular(
+                          DesignTokens.radiusFull,
+                        ),
                       ),
                       child: Text(
                         'PRO',
@@ -632,7 +734,9 @@ Track live: ${EnvConfig.trackingBaseUrl}/track/${widget.bookingId ?? ''}
                   _vehicleDetails,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: TokenTextStyles.bodySmall(color: colors.onSurfaceVariant),
+                  style: TokenTextStyles.bodySmall(
+                    color: colors.onSurfaceVariant,
+                  ),
                 ),
                 SizedBox(height: DesignTokens.spacingXxs),
                 Row(
@@ -645,12 +749,16 @@ Track live: ${EnvConfig.trackingBaseUrl}/track/${widget.bookingId ?? ''}
                     SizedBox(width: DesignTokens.spacingXxs),
                     Text(
                       '4.9',
-                      style: TokenTextStyles.labelMedium(color: colors.onSurface),
+                      style: TokenTextStyles.labelMedium(
+                        color: colors.onSurface,
+                      ),
                     ),
                     SizedBox(width: DesignTokens.spacingSm),
                     Text(
                       '2,184 trips',
-                      style: TokenTextStyles.labelMedium(color: colors.onSurfaceVariant),
+                      style: TokenTextStyles.labelMedium(
+                        color: colors.onSurfaceVariant,
+                      ),
                     ),
                   ],
                 ),
@@ -682,6 +790,24 @@ Track live: ${EnvConfig.trackingBaseUrl}/track/${widget.bookingId ?? ''}
   }
 
   Widget _buildOtpCard(BuildContext context, AppColorsExtension colors) {
+    final pendingStops = _intermediateStops
+        .where((s) => s['otpVerified'] != true)
+        .toList();
+    final Map<String, dynamic>? pendingStop = pendingStops.isEmpty
+        ? null
+        : pendingStops.first;
+    final showingPickup = _bookingStatus == 'DRIVER_ASSIGNED';
+    final showingStop = !showingPickup && pendingStop != null;
+    final shownCode = showingPickup
+        ? _pickupOtp
+        : showingStop
+        ? (_stopOtps['${pendingStop['sequence']}'] ?? '')
+        : _dropOtp;
+    final codeLabel = showingPickup
+        ? 'Pickup verification code'
+        : showingStop
+        ? 'Stop ${pendingStop['sequence']} delivery code'
+        : 'Final delivery code';
     return PDCard(
       variant: PDCardVariant.glass,
       padding: EdgeInsets.all(DesignTokens.spacingLg),
@@ -698,7 +824,7 @@ Track live: ${EnvConfig.trackingBaseUrl}/track/${widget.bookingId ?? ''}
               ),
               SizedBox(width: DesignTokens.spacingSm),
               Text(
-                AppStrings.pickupOtp,
+                codeLabel,
                 style: TokenTextStyles.titleMedium(color: colors.onSurface),
               ),
               const Spacer(),
@@ -729,7 +855,7 @@ Track live: ${EnvConfig.trackingBaseUrl}/track/${widget.bookingId ?? ''}
                   ),
                 ),
                 child: Text(
-                  index < _pickupOtp.length ? _pickupOtp[index] : '–',
+                  index < shownCode.length ? shownCode[index] : '–',
                   style: TokenTextStyles.priceSmall(
                     color: colors.onSurface,
                     letterSpacing: 2,
@@ -741,7 +867,11 @@ Track live: ${EnvConfig.trackingBaseUrl}/track/${widget.bookingId ?? ''}
           SizedBox(height: DesignTokens.spacingMd),
           Center(
             child: Text(
-              'Share this code with the driver to start the trip',
+              showingPickup
+                  ? 'Share this code with the driver to start the trip'
+                  : showingStop
+                  ? 'Share this code when the driver reaches ${pendingStop['address'] ?? 'the stop'}'
+                  : 'Share this code when the delivery reaches its final destination',
               textAlign: TextAlign.center,
               style: TokenTextStyles.bodySmall(color: colors.onSurfaceVariant),
             ),
@@ -796,23 +926,11 @@ Track live: ${EnvConfig.trackingBaseUrl}/track/${widget.bookingId ?? ''}
           children: [
             Row(
               children: [
-                _buildStep(
-                  colors,
-                  index: 0,
-                  label: AppStrings.driverArriving,
-                ),
+                _buildStep(colors, index: 0, label: AppStrings.driverArriving),
                 _buildConnector(colors, index: 0),
-                _buildStep(
-                  colors,
-                  index: 1,
-                  label: AppStrings.driverArrived,
-                ),
+                _buildStep(colors, index: 1, label: AppStrings.driverArrived),
                 _buildConnector(colors, index: 1),
-                _buildStep(
-                  colors,
-                  index: 2,
-                  label: AppStrings.inTransit,
-                ),
+                _buildStep(colors, index: 2, label: AppStrings.inTransit),
               ],
             ),
             SizedBox(height: DesignTokens.spacingMd),
@@ -866,7 +984,9 @@ Track live: ${EnvConfig.trackingBaseUrl}/track/${widget.bookingId ?? ''}
                 TextButton(
                   onPressed: _showProofFlow,
                   child: Text(
-                    _statusIndex >= 2 ? 'Proof of delivery' : 'Capture pickup proof',
+                    _statusIndex >= 2
+                        ? 'Proof of delivery'
+                        : 'Capture pickup proof',
                     style: TokenTextStyles.labelLarge(color: colors.primary),
                   ),
                 ),

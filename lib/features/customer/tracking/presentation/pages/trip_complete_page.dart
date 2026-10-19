@@ -4,9 +4,10 @@ import 'package:flutter_animate/flutter_animate.dart';
 import 'package:go_router/go_router.dart';
 import 'package:lottie/lottie.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 
 import '../../../../../config/router/route_names.dart';
+import '../../../../../config/env/env_config.dart';
 import '../../../../../core/constants/app_constants.dart';
 import '../../../../../core/constants/colors.dart';
 import '../../../../../core/constants/dimensions.dart';
@@ -97,27 +98,43 @@ class _TripCompletePageState extends State<TripCompletePage> {
     }
   }
 
-  void _submitRating() async {
+  Future<void> _submitRating() async {
     if (_rating == 0) {
       AppToast.warning(context, 'Please select a star rating first');
       return;
     }
 
-    final uid = FirebaseAuth.instance.currentUser?.uid;
     final bookingId = widget.bookingId;
+    if (FirebaseAuth.instance.currentUser == null ||
+        bookingId == null ||
+        bookingId.isEmpty) {
+      AppToast.error(
+        context,
+        'This trip cannot be rated because its booking details are missing.',
+      );
+      return;
+    }
     final review = _reviewController.text.trim();
     try {
-      await FirebaseFirestore.instance.collection('ratings').add({
-        'fromUserId': uid,
-        'bookingId': bookingId,
-        'toUserId': widget.driverId,
-        'driverId': widget.driverId,
-        'rating': _rating,
-        'review': review.isEmpty ? null : review,
-        'createdAt': FieldValue.serverTimestamp(),
-      });
+      await FirebaseFunctions.instanceFor(region: EnvConfig.functionsRegion)
+          .httpsCallable('submitTripRating')
+          .call({'bookingId': bookingId, 'rating': _rating, 'review': review});
+    } on FirebaseFunctionsException catch (e) {
+      if (!mounted) return;
+      AppToast.error(
+        context,
+        e.code == 'already-exists'
+            ? 'You already rated this trip.'
+            : (e.message ?? 'Could not submit your rating.'),
+      );
+      return;
     } catch (_) {
-      // Ignore if rating cannot be persisted (rules deny, etc). Don't block navigation.
+      if (!mounted) return;
+      AppToast.error(
+        context,
+        'Could not submit your rating. Please try again.',
+      );
+      return;
     }
 
     if (!mounted) return;
@@ -198,58 +215,60 @@ class _TripCompletePageState extends State<TripCompletePage> {
 
   Widget _buildSuccessHeader(BuildContext context, AppColorsExtension colors) {
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.center,
-      children: [
-        Container(
-          width: 128,
-          height: 128,
-          alignment: Alignment.center,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            gradient: RadialGradient(
-              colors: [
-                colors.success.withValues(alpha: 0.25),
-                colors.success.withValues(alpha: 0.05),
-              ],
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            Container(
+                  width: 128,
+                  height: 128,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    gradient: RadialGradient(
+                      colors: [
+                        colors.success.withValues(alpha: 0.25),
+                        colors.success.withValues(alpha: 0.05),
+                      ],
+                    ),
+                  ),
+                  child: SizedBox(
+                    width: 112,
+                    height: 112,
+                    child: Lottie.asset(
+                      'assets/animations/trip_complete.json',
+                      width: 112,
+                      height: 112,
+                      repeat: false,
+                      fit: BoxFit.contain,
+                      frameRate: FrameRate.max,
+                    ),
+                  ),
+                )
+                .animate()
+                .fadeIn(duration: AppConstants.mediumAnimation)
+                .scale(
+                  begin: const Offset(0.5, 0.5),
+                  end: const Offset(1.0, 1.0),
+                  duration: AppConstants.dramaticAnimation,
+                  curve: Curves.elasticOut,
+                ),
+            const SizedBox(height: AppDimensions.spacingLg),
+            Text(
+              AppStrings.tripCompleted,
+              textAlign: TextAlign.center,
+              style: AppTextStyles.displaySmall.copyWith(
+                color: colors.onSurface,
+              ),
             ),
-          ),
-          child: SizedBox(
-            width: 112,
-            height: 112,
-            child: Lottie.asset(
-              'assets/animations/trip_complete.json',
-              width: 112,
-              height: 112,
-              repeat: false,
-              fit: BoxFit.contain,
-              frameRate: FrameRate.max,
+            const SizedBox(height: AppDimensions.spacingXs),
+            Text(
+              'Your goods were delivered safely to the drop location',
+              textAlign: TextAlign.center,
+              style: AppTextStyles.bodyMedium.copyWith(
+                color: colors.onSurfaceVariant,
+              ),
             ),
-          ),
+          ],
         )
-            .animate()
-            .fadeIn(duration: AppConstants.mediumAnimation)
-            .scale(
-              begin: const Offset(0.5, 0.5),
-              end: const Offset(1.0, 1.0),
-              duration: AppConstants.dramaticAnimation,
-              curve: Curves.elasticOut,
-            ),
-        const SizedBox(height: AppDimensions.spacingLg),
-        Text(
-          AppStrings.tripCompleted,
-          textAlign: TextAlign.center,
-          style: AppTextStyles.displaySmall.copyWith(color: colors.onSurface),
-        ),
-        const SizedBox(height: AppDimensions.spacingXs),
-        Text(
-          'Your goods were delivered safely to the drop location',
-          textAlign: TextAlign.center,
-          style: AppTextStyles.bodyMedium.copyWith(
-            color: colors.onSurfaceVariant,
-          ),
-        ),
-      ],
-    )
         .animate(delay: 150.ms)
         .fadeIn(duration: AppConstants.mediumAnimation)
         .slideY(begin: 0.15, end: 0);
@@ -483,19 +502,22 @@ class _TripCompletePageState extends State<TripCompletePage> {
             padding: const EdgeInsets.symmetric(
               horizontal: AppDimensions.spacingSm,
             ),
-            child: Icon(
-              selected ? Icons.star_rounded : Icons.star_outline_rounded,
-              size: 46,
-              color: selected ? Colors.amber : colors.outline,
-            )
-                .animate(delay: (index * 70).ms)
-                .fadeIn(duration: AppConstants.mediumAnimation)
-                .scale(
-                  begin: const Offset(0.5, 0.5),
-                  end: const Offset(1.0, 1.0),
-                  duration: AppConstants.longAnimation,
-                  curve: Curves.easeOutBack,
-                ),
+            child:
+                Icon(
+                      selected
+                          ? Icons.star_rounded
+                          : Icons.star_outline_rounded,
+                      size: 46,
+                      color: selected ? Colors.amber : colors.outline,
+                    )
+                    .animate(delay: (index * 70).ms)
+                    .fadeIn(duration: AppConstants.mediumAnimation)
+                    .scale(
+                      begin: const Offset(0.5, 0.5),
+                      end: const Offset(1.0, 1.0),
+                      duration: AppConstants.longAnimation,
+                      curve: Curves.easeOutBack,
+                    ),
           ),
         );
       }),

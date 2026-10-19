@@ -1,19 +1,34 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../../../../config/router/route_names.dart';
+import '../../../../../config/env/env_config.dart';
 import '../../../../../core/constants/colors.dart';
 import '../../../../../core/constants/dimensions.dart';
 import '../../../../../core/theme/text_styles.dart';
 import '../../../../../core/widgets/glass_card.dart';
 import '../../../../../core/widgets/gradient_button.dart';
-import '../widgets/live_share_card.dart';
 
 class WebTrackingPage extends StatelessWidget {
   const WebTrackingPage({super.key, required this.bookingId});
 
   final String bookingId;
+
+  Stream<Map<String, dynamic>> _trackingUpdates() async* {
+    while (true) {
+      try {
+        final result = await FirebaseFunctions.instanceFor(region: EnvConfig.functionsRegion)
+            .httpsCallable('getPublicTracking')
+            .call({'token': bookingId});
+        yield Map<String, dynamic>.from(result.data as Map);
+      } catch (_) {
+        yield {'unavailable': true};
+      }
+      await Future<void>.delayed(const Duration(seconds: 8));
+    }
+  }
 
   static const List<_Stage> _stages = [
     _Stage('SEARCHING', 'Finding your driver'),
@@ -29,31 +44,35 @@ class WebTrackingPage extends StatelessWidget {
 
     return Scaffold(
       backgroundColor: colors.surface,
-      body: StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
-        stream: FirebaseFirestore.instance
-            .collection('bookings')
-            .doc(bookingId)
-            .snapshots(),
+      body: StreamBuilder<Map<String, dynamic>>(
+        stream: _trackingUpdates(),
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator());
           }
 
-          final data = snapshot.data?.data();
+          final data = snapshot.data;
           if (data == null) {
             if (snapshot.connectionState == ConnectionState.waiting) {
               return const Center(child: CircularProgressIndicator());
             }
             return _MissingView(bookingId: bookingId, colors: colors);
           }
+          if (data['unavailable'] == true) return _MissingView(bookingId: bookingId, colors: colors);
 
           final status = (data['status'] as String? ?? 'SEARCHING').toUpperCase();
           final stageIndex = _stages.indexWhere((s) => s.id == status);
           final activeIndex = stageIndex < 0 ? 0 : stageIndex;
-          final driverId = data['driverId'] as String?;
-          final pickup = data['pickup'] as Map<String, dynamic>? ?? {};
-          final drop = data['drop'] as Map<String, dynamic>? ?? {};
-          final fare = (data['fareBreakdown'] as Map<String, dynamic>? ?? {})['total'];
+          final hasDriver = data['hasDriver'] == true;
+          final pickup = (data['pickupAddress'] as String?) ?? 'Pickup';
+          final drop = (data['dropAddress'] as String?) ?? 'Drop';
+          final stops = (data['stops'] as List<dynamic>? ?? const [])
+              .map((stop) => stop is Map ? (stop['address'] as String? ?? '') : '')
+              .where((address) => address.isNotEmpty)
+              .toList(growable: false);
+          final driverName = (data['driverName'] as String?) ?? 'Your driver';
+          final vehicleNumber = (data['vehicleNumber'] as String?) ?? '';
+          final driverLocation = data['driverLocation'] as Map<String, dynamic>?;
 
           return SafeArea(
             child: Center(
@@ -119,31 +138,21 @@ class WebTrackingPage extends StatelessWidget {
                     ),
                     const SizedBox(height: AppDimensions.spacingLg),
                     _RouteCard(
-                      pickup: (pickup['address'] as String?) ?? 'Pickup',
-                      drop: (drop['address'] as String?) ?? 'Drop',
+                      pickup: pickup,
+                      drop: drop,
+                      stops: stops,
                     ),
                     const SizedBox(height: AppDimensions.spacingLg),
-                    FutureBuilder<DocumentSnapshot<Map<String, dynamic>>>(
-                      future: driverId == null || driverId.isEmpty
-                          ? null
-                          : FirebaseFirestore.instance
-                              .collection('drivers')
-                              .doc(driverId)
-                              .get(),
-                      builder: (context, driverSnap) {
-                        final driver = driverSnap.data?.data();
-                        final name =
-                            (driver?['name'] as String?) ?? 'Your driver';
-                        return GlassCard(
-                          child: Row(
+                    GlassCard(
+                      child: Row(
                             children: [
                               CircleAvatar(
                                 backgroundColor:
                                     colors.primary.withValues(alpha: 0.15),
                                 child: Text(
-                                  name.isEmpty
+                                  driverName.isEmpty
                                       ? '?'
-                                      : name[0].toUpperCase(),
+                                      : driverName[0].toUpperCase(),
                                   style: AppTextStyles.titleSmall
                                       .copyWith(color: colors.primary),
                                 ),
@@ -153,28 +162,33 @@ class WebTrackingPage extends StatelessWidget {
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    Text(name, style: AppTextStyles.titleSmall),
+                                    Text(driverName, style: AppTextStyles.titleSmall),
                                     Text(
-                                      driverId == null || driverId.isEmpty
+                                      !hasDriver
                                           ? 'Waiting for a driver to accept'
-                                          : 'Verified PickDrop partner',
+                                          : vehicleNumber.isEmpty ? 'Verified PickDrop partner' : 'Verified PickDrop partner • $vehicleNumber',
                                       style: AppTextStyles.bodySmall.copyWith(
                                           color: colors.onSurfaceVariant),
                                     ),
                                   ],
                                 ),
                               ),
-                              if (fare != null)
-                                Text(
-                                  '₹${(fare as num).toStringAsFixed(0)}',
-                                  style: AppTextStyles.titleMedium
-                                      .copyWith(color: colors.primary),
-                                ),
                             ],
                           ),
-                        );
-                      },
                     ),
+                    if (driverLocation != null) ...[
+                      const SizedBox(height: AppDimensions.spacingSm),
+                      ListTile(
+                        leading: const Icon(Icons.my_location_rounded),
+                        title: const Text('Driver location'),
+                        subtitle: const Text('Tap to view the latest position on a map'),
+                        onTap: () {
+                          final lat = (driverLocation['lat'] as num).toDouble();
+                          final lng = (driverLocation['lng'] as num).toDouble();
+                          launchUrl(Uri.parse('https://maps.google.com/?q=$lat,$lng'), mode: LaunchMode.externalApplication);
+                        },
+                      ),
+                    ],
                     const SizedBox(height: AppDimensions.spacingXl),
                     GradientButton(
                       text: 'Book your own PickDrop',
@@ -182,17 +196,6 @@ class WebTrackingPage extends StatelessWidget {
                       onPressed: () => context.go(RouteNames.customerHome),
                     ),
                     const SizedBox(height: AppDimensions.spacingMd),
-                    TextButton(
-                      onPressed: () => showModalBottomSheet<void>(
-                        context: context,
-                        isScrollControlled: true,
-                        backgroundColor: Colors.transparent,
-                        builder: (context) => LiveShareCard(
-                          bookingId: bookingId,
-                        ),
-                      ),
-                      child: const Text('Copy this tracking link'),
-                    ),
                   ],
                 ),
               ),
@@ -205,10 +208,11 @@ class WebTrackingPage extends StatelessWidget {
 }
 
 class _RouteCard extends StatelessWidget {
-  const _RouteCard({required this.pickup, required this.drop});
+  const _RouteCard({required this.pickup, required this.drop, required this.stops});
 
   final String pickup;
   final String drop;
+  final List<String> stops;
 
   @override
   Widget build(BuildContext context) {
@@ -221,17 +225,15 @@ class _RouteCard extends StatelessWidget {
             icon: Icons.trip_origin_rounded,
             label: pickup,
           ),
-          Padding(
-            padding: const EdgeInsets.only(left: AppDimensions.spacingSm),
-            child: Align(
-              alignment: Alignment.centerLeft,
-              child: Container(
-                width: 2,
-                height: AppDimensions.spacingLg,
-                color: colors.outline,
-              ),
+          for (var i = 0; i < stops.length; i++) ...[
+            _Connector(color: colors.outline),
+            _Point(
+              color: colors.warning,
+              icon: Icons.more_horiz_rounded,
+              label: stops[i],
             ),
-          ),
+          ],
+          _Connector(color: colors.outline),
           _Point(
             color: colors.error,
             icon: Icons.location_on_rounded,
@@ -241,6 +243,25 @@ class _RouteCard extends StatelessWidget {
       ),
     );
   }
+}
+
+class _Connector extends StatelessWidget {
+  const _Connector({required this.color});
+
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.only(left: AppDimensions.spacingSm),
+        child: Align(
+          alignment: Alignment.centerLeft,
+          child: Container(
+            width: 2,
+            height: AppDimensions.spacingLg,
+            color: color,
+          ),
+        ),
+      );
 }
 
 class _Point extends StatelessWidget {

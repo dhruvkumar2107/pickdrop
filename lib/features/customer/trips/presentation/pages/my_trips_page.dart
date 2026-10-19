@@ -1,5 +1,9 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../../../../config/router/route_names.dart';
@@ -22,62 +26,45 @@ class _MyTripsPageState extends State<MyTripsPage> {
   static const List<String> _filters = ['All', 'Active', 'Completed'];
   int _selectedFilter = 0;
 
-  static final List<_MockTrip> _mockTrips = [
-    _MockTrip(
-      id: 'PD1001',
-      status: 'IN_TRANSIT',
-      pickup: '123 MG Road, Bangalore',
-      drop: '456 Koramangala, Bangalore',
-      fare: 249,
-      dateTime: DateTime(2026, 10, 2, 14, 30),
-      vehicleType: 'Bike',
-    ),
-    _MockTrip(
-      id: 'PD1002',
-      status: 'DRIVER_ASSIGNED',
-      pickup: '789 Indiranagar, Bangalore',
-      drop: '321 Whitefield, Bangalore',
-      fare: 450,
-      dateTime: DateTime(2026, 10, 3, 9, 15),
-      vehicleType: '3-Wheeler',
-    ),
-    _MockTrip(
-      id: 'PD1003',
-      status: 'ARRIVED',
-      pickup: '12 Jayanagar 4th Block',
-      drop: '88 BTM Layout 2nd Stage',
-      fare: 199,
-      dateTime: DateTime(2026, 10, 4, 18, 5),
-      vehicleType: 'Mini Truck',
-    ),
-    _MockTrip(
-      id: 'PD1004',
-      status: 'COMPLETED',
-      pickup: '55 Electronic City Phase 1',
-      drop: '9 HSR Layout Sector 2',
-      fare: 520,
-      dateTime: DateTime(2026, 9, 28, 11, 45),
-      vehicleType: 'Pickup',
-    ),
-    _MockTrip(
-      id: 'PD1005',
-      status: 'DELIVERED',
-      pickup: '22 Rajajinagar Industrial Area',
-      drop: '40 Malleshwaram 8th Cross',
-      fare: 310,
-      dateTime: DateTime(2026, 9, 22, 16, 20),
-      vehicleType: '3-Wheeler',
-    ),
-    _MockTrip(
-      id: 'PD1006',
-      status: 'CANCELLED',
-      pickup: '15 Yeshwanthpur',
-      drop: '63 Hebbal Flyover',
-      fare: 275,
-      dateTime: DateTime(2026, 9, 15, 10, 0),
-      vehicleType: 'Bike',
-    ),
-  ];
+  List<_MockTrip> _trips = const [];
+  StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _bookingSub;
+
+  @override
+  void initState() {
+    super.initState();
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+    _bookingSub = FirebaseFirestore.instance
+        .collection('bookings')
+        .where('customerId', isEqualTo: uid)
+        .snapshots()
+        .listen((snapshot) {
+      if (!mounted) return;
+      final trips = snapshot.docs.map((doc) {
+        final data = doc.data();
+        final pickup = data['pickup'] as Map<String, dynamic>? ?? const {};
+        final drop = data['drop'] as Map<String, dynamic>? ?? const {};
+        final fare = data['fareBreakdown'] as Map<String, dynamic>? ?? const {};
+        final createdAt = data['createdAt'];
+        return _MockTrip(
+          id: doc.id,
+          status: data['status'] as String? ?? 'UNKNOWN',
+          pickup: pickup['address'] as String? ?? 'Pickup location',
+          drop: drop['address'] as String? ?? 'Drop location',
+          fare: (fare['total'] as num?)?.toDouble() ?? 0,
+          dateTime: createdAt is Timestamp ? createdAt.toDate() : DateTime.now(),
+          vehicleType: data['vehicleTypeId'] as String? ?? 'Delivery',
+        );
+      }).toList()..sort((a, b) => b.dateTime.compareTo(a.dateTime));
+      setState(() => _trips = trips);
+    });
+  }
+
+  @override
+  void dispose() {
+    _bookingSub?.cancel();
+    super.dispose();
+  }
 
   bool _isActiveStatus(String status) {
     final normalized = status.toUpperCase();
@@ -96,11 +83,11 @@ class _MyTripsPageState extends State<MyTripsPage> {
   List<_MockTrip> get _filteredTrips {
     switch (_selectedFilter) {
       case 1:
-        return _mockTrips.where((t) => _isActiveStatus(t.status)).toList();
+        return _trips.where((t) => _isActiveStatus(t.status)).toList();
       case 2:
-        return _mockTrips.where((t) => _isCompletedStatus(t.status)).toList();
+        return _trips.where((t) => _isCompletedStatus(t.status)).toList();
       default:
-        return _mockTrips;
+        return _trips;
     }
   }
 
@@ -108,11 +95,6 @@ class _MyTripsPageState extends State<MyTripsPage> {
     final hh = date.hour.toString().padLeft(2, '0');
     final mm = date.minute.toString().padLeft(2, '0');
     return '${date.day}/${date.month}/${date.year} • $hh:$mm';
-  }
-
-  void _openTripDetail() {
-    if (!mounted) return;
-    context.push(RouteNames.tripDetail);
   }
 
   @override
@@ -176,7 +158,11 @@ class _MyTripsPageState extends State<MyTripsPage> {
                   return _PremiumTripCard(
                     trip: trip,
                     formattedDate: _formatDate(trip.dateTime),
-                    onTap: _openTripDetail,
+                    onTap: () {
+                      if (trip.id.isNotEmpty) {
+                        context.go('${RouteNames.tripDetail}?bookingId=${Uri.encodeComponent(trip.id)}');
+                      }
+                    },
                   )
                       .animate()
                       .fadeIn(duration: AppConstants.mediumAnimation)
@@ -246,7 +232,7 @@ class _MyTripsPageState extends State<MyTripsPage> {
                   border: Border.all(color: Colors.white.withValues(alpha: 0.28)),
                 ),
                 child: Text(
-                  '${_mockTrips.length} trips',
+                  '${_trips.length} trips',
                   style: const TextStyle(
                     fontFamily: 'Poppins',
                     fontSize: 12,

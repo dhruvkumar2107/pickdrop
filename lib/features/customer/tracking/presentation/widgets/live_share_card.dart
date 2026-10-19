@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:go_router/go_router.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -19,27 +20,52 @@ class LiveShareCard extends StatelessWidget {
 
   final String bookingId;
 
-  String get trackingUrl => '${EnvConfig.trackingBaseUrl}/track/$bookingId';
-
-  String get _message => 'Track my PickDrop trip live: $trackingUrl';
-
-  Future<void> _openWhatsApp(BuildContext context) async {
-    final uri = Uri.parse(
-      'https://wa.me/?text=${Uri.encodeComponent(_message)}',
-    );
-    if (await canLaunchUrl(uri)) {
-      await launchUrl(uri, mode: LaunchMode.externalApplication);
-      return;
-    }
-    if (!context.mounted) return;
-    await SharePlus.instance.share(
-      ShareParams(text: _message, subject: 'Share my live PickDrop trip'),
-    );
+  Future<String> _trackingUrl() async {
+    final response = await FirebaseFunctions.instanceFor(region: EnvConfig.functionsRegion)
+        .httpsCallable('createPublicTrackingLink')
+        .call({'bookingId': bookingId});
+    final token = Map<String, dynamic>.from(response.data as Map)['token'] as String;
+    return '${EnvConfig.trackingBaseUrl}/track/$token';
   }
 
-  void _copyLink(BuildContext context) {
-    AppHelpers.copyToClipboard(trackingUrl);
-    AppToast.success(context, 'Tracking link copied to clipboard');
+  Future<void> _openWhatsApp(BuildContext context) async {
+    try {
+      final url = await _trackingUrl();
+      final message = 'Track my PickDrop trip live: $url';
+      final uri = Uri.parse('https://wa.me/?text=${Uri.encodeComponent(message)}');
+      if (await canLaunchUrl(uri)) {
+        await launchUrl(uri, mode: LaunchMode.externalApplication);
+        return;
+      }
+      if (!context.mounted) return;
+      await SharePlus.instance.share(ShareParams(text: message, subject: 'Share my live PickDrop trip'));
+    } catch (_) {
+      if (context.mounted) AppToast.error(context, 'Could not create a tracking link. Try again.');
+    }
+  }
+
+  Future<void> _copyLink(BuildContext context) async {
+    try {
+      final url = await _trackingUrl();
+      AppHelpers.copyToClipboard(url);
+      if (context.mounted) AppToast.success(context, 'Tracking link copied to clipboard');
+    } catch (_) {
+      if (context.mounted) AppToast.error(context, 'Could not create a tracking link. Try again.');
+    }
+  }
+
+  Future<void> _stopSharing(BuildContext context) async {
+    try {
+      await FirebaseFunctions.instanceFor(region: EnvConfig.functionsRegion)
+          .httpsCallable('revokePublicTrackingLink')
+          .call({'bookingId': bookingId});
+      if (context.mounted) {
+        AppToast.success(context, 'Live tracking link disabled');
+        Navigator.of(context).pop();
+      }
+    } catch (_) {
+      if (context.mounted) AppToast.error(context, 'Could not disable the tracking link. Try again.');
+    }
   }
 
   @override
@@ -103,7 +129,7 @@ class LiveShareCard extends StatelessWidget {
               const SizedBox(width: AppDimensions.spacingSm),
               Expanded(
                 child: Text(
-                  trackingUrl,
+                  'A private tracking link will be created when you share.',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: AppTextStyles.labelMedium.copyWith(
@@ -128,6 +154,13 @@ class LiveShareCard extends StatelessWidget {
           onPressed: () => _copyLink(context),
           borderColor: colors.outline,
           textColor: colors.onSurface,
+        ),
+        const SizedBox(height: AppDimensions.spacingSm),
+        TextButton.icon(
+          onPressed: () => _stopSharing(context),
+          icon: const Icon(Icons.link_off_rounded),
+          label: const Text('Stop sharing this link'),
+          style: TextButton.styleFrom(foregroundColor: colors.error),
         ),
         const SizedBox(height: AppDimensions.spacingMd),
         GlassCard(

@@ -42,6 +42,7 @@ import '../../features/driver/earnings/presentation/pages/driver_earnings_page.d
 import '../../features/driver/profile/presentation/pages/driver_profile_page.dart';
 import '../../features/driver/trips/presentation/pages/driver_trip_history_page.dart';
 import '../../features/driver/onboarding/presentation/pages/driver_onboarding_page.dart';
+import '../../features/admin/presentation/pages/admin_review_page.dart';
 import 'route_names.dart';
 
 final appRouterProvider = Provider<GoRouter>((ref) {
@@ -235,7 +236,10 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: RouteNames.tripDetail,
         name: 'tripDetail',
-        builder: (context, state) => const TripDetailPage(),
+        builder: (context, state) {
+          final q = state.uri.queryParameters;
+          return TripDetailPage(bookingId: q['bookingId']);
+        },
       ),
       GoRoute(
         path: RouteNames.wallet,
@@ -341,6 +345,11 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         path: RouteNames.driverPayouts,
         name: 'driverPayouts',
         builder: (context, state) => const DriverPayoutsPage(),
+      ),
+      GoRoute(
+        path: RouteNames.adminReview,
+        name: 'adminReview',
+        builder: (context, state) => const AdminReviewPage(),
       ),
 
       // ─── Common ─────────────────────────────────────────────────────────
