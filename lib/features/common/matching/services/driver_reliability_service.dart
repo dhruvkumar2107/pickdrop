@@ -65,12 +65,7 @@ class DriverReliabilityModel {
 }
 
 class DriverMatchingService {
-  final FirebaseFirestore _firestore;
-
-  DriverMatchingService({FirebaseFirestore? firestore})
-      : _firestore = firestore ?? FirebaseFirestore.instance;
-
-  /// Validates distance <= 3km and rejects Mock GPS
+  /// Validates distance <= 3km and rejects Mock GPS.
   bool validateDriverGps({
     required double driverLat,
     required double driverLng,
@@ -79,44 +74,7 @@ class DriverMatchingService {
     required bool isMockLocation,
   }) {
     if (isMockLocation) return false;
-    final distKm = _calculateDistanceKm(driverLat, driverLng, pickupLat, pickupLng);
-    return distKm <= 3.0;
-  }
-
-  /// Handles driver cancellation: triggers auto-rematch with priority boost + Rs 25 wallet credit
-  Future<Map<String, dynamic>> handleDriverCancel({
-    required String bookingId,
-    required String customerId,
-    required String driverId,
-    required String reason,
-  }) async {
-    final penaltyRecord = {
-      'bookingId': bookingId,
-      'driverId': driverId,
-      'customerId': customerId,
-      'reason': reason,
-      'customerCompensation': 25.0, // Rs 25 wallet credit
-      'driverPenalty': 'STRIKE_RECORDED_AND_TEMP_MATCH_LOCK',
-      'priorityRematchBoost': true,
-      'timestamp': FieldValue.serverTimestamp(),
-    };
-
-    try {
-      await _firestore.collection('driverPenalties').add(penaltyRecord);
-      await _firestore.collection('wallets').doc(customerId).set({
-        'balance': FieldValue.increment(25.0),
-        'lastCreditReason': 'Driver cancellation auto-compensation ₹25',
-      }, SetOptions(merge: true));
-    } catch (_) {
-      // Offline fallback
-    }
-
-    return {
-      'success': true,
-      'creditAmount': 25.0,
-      'priorityBoost': true,
-      'message': 'Driver cancelled. ₹25 credited to your wallet & searching new driver with priority boost!',
-    };
+    return _calculateDistanceKm(driverLat, driverLng, pickupLat, pickupLng) <= 3.0;
   }
 
   double _calculateDistanceKm(double lat1, double lon1, double lat2, double lon2) {

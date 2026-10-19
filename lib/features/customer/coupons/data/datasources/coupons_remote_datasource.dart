@@ -126,9 +126,4 @@ class CouponsRemoteDataSource {
     return discount.clamp(0, orderValue);
   }
 
-  Future<void> applyCoupon(String couponId) async {
-    await _firestore.collection('coupons').doc(couponId).update({
-      'usedCount': FieldValue.increment(1),
-    });
-  }
 }

@@ -1,8 +1,8 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 
+import '../../../../../config/env/env_config.dart';
 import '../../../../../core/constants/colors.dart';
 import '../../../../../core/constants/dimensions.dart';
 import '../../../../../core/theme/design_tokens.dart';
@@ -80,26 +80,27 @@ class _InstantRefundCardState extends State<InstantRefundCard> {
     final amount = _refundFor(issue);
     setState(() => _processing = true);
 
-    final uid = FirebaseAuth.instance.currentUser?.uid;
-    if (uid != null) {
-      try {
-        await FirebaseFirestore.instance.collection('reports').add({
-          'type': 'REFUND_REQUEST',
-          'reporterId': uid,
-          'issue': issue.id,
-          'bookingId': widget.bookingId ?? '',
-          'amount': amount,
-          'status': 'VERIFIED_INSTANT_REFUND',
-          'timestamp': FieldValue.serverTimestamp(),
-        });
-      } catch (_) {}
-
-      try {
-        await FirebaseFirestore.instance.collection('wallets').doc(uid).set({
-          'balance': FieldValue.increment(amount),
-          'lastCreditReason': 'Instant refund - ${issue.label}',
-        }, SetOptions(merge: true));
-      } catch (_) {}
+    try {
+      await FirebaseFunctions.instanceFor(region: EnvConfig.functionsRegion)
+          .httpsCallable('requestInstantRefund')
+          .call({
+            'bookingId': widget.bookingId,
+            'reason': 'Refund requested - ${issue.label}',
+            'amount': amount,
+          });
+    } on FirebaseFunctionsException catch (e) {
+      if (!mounted) return;
+      setState(() => _processing = false);
+      AppToast.error(
+        context,
+        e.message ?? 'Could not submit your request. Please try again.',
+      );
+      return;
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _processing = false);
+      AppToast.error(context, 'Could not submit your request. Please try again.');
+      return;
     }
 
     if (!mounted) return;
@@ -110,7 +111,6 @@ class _InstantRefundCardState extends State<InstantRefundCard> {
       _refundedLabel = issue.label;
     });
     widget.onRefunded?.call();
-    AppToast.success(context, '₹${amount.toStringAsFixed(0)} refunded to your wallet instantly');
   }
 
   @override
@@ -138,7 +138,7 @@ class _InstantRefundCardState extends State<InstantRefundCard> {
                   Icon(Icons.bolt_rounded, color: colors.success, size: 20),
                   const SizedBox(width: AppDimensions.spacingSm),
                   Text(
-                    'Instant refund promise',
+                    'Fast refund review',
                     style: AppTextStyles.titleSmall.copyWith(
                       color: colors.onSurface,
                       fontWeight: FontWeight.w700,
@@ -148,7 +148,7 @@ class _InstantRefundCardState extends State<InstantRefundCard> {
               ),
               const SizedBox(height: AppDimensions.spacingXs),
               Text(
-                'Verified issues are refunded straight to your PickDrop wallet in seconds - no forms, no waiting, no tickets.',
+                'Tell us what went wrong. Our team reviews every claim and refunds verified issues to your PickDrop wallet.',
                 style: AppTextStyles.bodySmall.copyWith(
                   color: colors.onSurfaceVariant,
                   height: DesignTokens.lhRelaxed,
@@ -167,13 +167,13 @@ class _InstantRefundCardState extends State<InstantRefundCard> {
         if (_selected != null) ...[
           const SizedBox(height: AppDimensions.spacingSm),
           Text(
-            'Refund of ₹${_refundFor(_selected!).toStringAsFixed(0)} will be credited to your wallet instantly.',
+            'We will review this and refund up to ₹${_refundFor(_selected!).toStringAsFixed(0)} to your wallet.',
             style: AppTextStyles.bodySmall.copyWith(color: colors.onSurfaceVariant),
           ),
         ],
         const SizedBox(height: AppDimensions.spacingLg),
         GradientButton(
-          text: 'Get instant refund',
+          text: 'Submit refund request',
           isLoading: _processing,
           onPressed: _getRefund,
         ),
@@ -195,7 +195,7 @@ class _InstantRefundCardState extends State<InstantRefundCard> {
             ),
         const SizedBox(height: AppDimensions.spacingMd),
         Text(
-          'Refunded to wallet instantly',
+          'Request received',
           textAlign: TextAlign.center,
           style: AppTextStyles.titleMedium.copyWith(
             color: colors.onSurface,
@@ -204,7 +204,7 @@ class _InstantRefundCardState extends State<InstantRefundCard> {
         ).animate().fadeIn(delay: 200.ms).slideY(begin: 0.3, end: 0),
         const SizedBox(height: AppDimensions.spacingXs),
         Text(
-          '₹${_refundedAmount.toStringAsFixed(0)} added for "${_refundedLabel.toLowerCase()}". Use it on your very next booking.',
+          'We are reviewing your "${_refundedLabel.toLowerCase()}" claim for up to ₹${_refundedAmount.toStringAsFixed(0)}. You will be notified once it is approved.',
           textAlign: TextAlign.center,
           style: AppTextStyles.bodySmall.copyWith(color: colors.onSurfaceVariant),
         ).animate().fadeIn(delay: 350.ms),
