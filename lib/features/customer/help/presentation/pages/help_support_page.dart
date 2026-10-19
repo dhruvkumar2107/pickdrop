@@ -52,7 +52,7 @@ class _HelpSupportPageState extends State<HelpSupportPage> {
   }
 
   void _requestCallback() {
-    AppToast.success(context, 'Callback requested - an agent will call you within 5 min.');
+    AppToast.info(context, 'Callbacks are not automated yet - tap Contact us to reach the team now.');
   }
 
   void _openInstantRefund() {
