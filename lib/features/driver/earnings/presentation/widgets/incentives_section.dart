@@ -4,25 +4,22 @@ import '../../../../../core/constants/colors.dart';
 import '../../../../../core/theme/design_tokens.dart';
 
 class IncentivesSection extends StatelessWidget {
-  const IncentivesSection({super.key, this.weeklyTrips = 26});
+  const IncentivesSection({super.key, required this.weeklyTrips});
 
   final int weeklyTrips;
+
+  static const int _weeklyTarget = 30;
 
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    final nextTier = weeklyTrips < 30
-        ? <String, Object>{'target': 30, 'bonus': 700}
-        : <String, Object>{'target': 40, 'bonus': 1200};
-    final target = nextTier['target'] as int;
-    final progress =
-        (weeklyTrips / target).clamp(0.0, 1.0).toDouble();
+    final progress = (weeklyTrips / _weeklyTarget).clamp(0.0, 1.0).toDouble();
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          'Incentives & bonuses',
+          'Weekly activity',
           style: TextStyle(
             fontFamily: 'Poppins',
             fontSize: 15,
@@ -32,7 +29,7 @@ class IncentivesSection extends StatelessWidget {
         ),
         const SizedBox(height: DesignTokens.spacingXs),
         Text(
-          'Steady demand, more earnings — these tiers refresh every Monday.',
+          'Your completed deliveries over the last seven days. Bonus programs are not active yet.',
           style: TextStyle(
             fontFamily: 'Poppins',
             fontSize: 11,
@@ -42,36 +39,22 @@ class IncentivesSection extends StatelessWidget {
         const SizedBox(height: DesignTokens.spacingMd),
         _IncentiveCard(
           icon: Icons.emoji_events_outlined,
-          title: 'Weekly trip bonus',
+          title: 'Deliveries this week',
           rows: <_IncentiveRow>[
             _IncentiveRow(
-              label: '$weeklyTrips / $target trips this week',
-              value: '₹${nextTier['bonus']} waiting',
+              label: '$weeklyTrips completed',
+              value: 'Goal $_weeklyTarget',
               highlight: true,
             ),
-            _IncentiveRow(label: '30 trips', value: '+ ₹700'),
-            _IncentiveRow(label: '40 trips', value: '+ ₹1,200'),
           ],
           progress: progress,
         ),
         const SizedBox(height: DesignTokens.spacingMd),
         _IncentiveCard(
           icon: Icons.access_time_rounded,
-          title: 'Peak hour incentives',
+          title: 'Peak-hour & streak bonuses',
           rows: <_IncentiveRow>[
-            _IncentiveRow(label: '7 – 10 AM weekdays', value: '+15% fare'),
-            _IncentiveRow(label: '5 – 9 PM weekdays', value: '+20% fare'),
-            _IncentiveRow(label: 'Weekend lunch rush', value: '+ ₹40 / trip'),
-          ],
-        ),
-        const SizedBox(height: DesignTokens.spacingMd),
-        _IncentiveCard(
-          icon: Icons.local_fire_department_outlined,
-          title: 'Streak rewards',
-          rows: <_IncentiveRow>[
-            _IncentiveRow(label: '5 days online', value: '+ ₹150'),
-            _IncentiveRow(label: '7 days online', value: '+ ₹400 & priority jobs'),
-            _IncentiveRow(label: '14 days online', value: '+ ₹1,000'),
+            _IncentiveRow(label: 'Program status', value: 'Not active yet'),
           ],
         ),
       ],

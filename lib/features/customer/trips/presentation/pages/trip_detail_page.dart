@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:go_router/go_router.dart';
 
+import '../../../../../config/router/route_names.dart';
 import '../../../../../core/constants/colors.dart';
 import '../../../../../core/constants/dimensions.dart';
 import '../../../../../core/theme/text_styles.dart';
@@ -253,11 +255,18 @@ class _TripDetailPageState extends State<TripDetailPage> {
                         _ActionRow(
                           icon: Icons.report_gmailerrorred_rounded,
                           label: 'Report an issue',
-                          subtitle: 'Instant refund to your wallet',
+                          subtitle: 'Request a refund or report a problem',
                           onTap: () => InstantRefundCard.show(
                             context,
                             bookingId: bookingId,
                           ),
+                        ),
+                        const Divider(height: AppDimensions.spacingMd),
+                        _ActionRow(
+                          icon: Icons.replay_rounded,
+                          label: 'Book again',
+                          subtitle: 'Reuse this pickup and drop',
+                          onTap: () => _rebook(context, pickup, drop),
                         ),
                       ],
                     ),
@@ -269,6 +278,31 @@ class _TripDetailPageState extends State<TripDetailPage> {
         ],
       ),
     ).animate().fadeIn(duration: 300.ms);
+  }
+
+  void _rebook(
+    BuildContext context,
+    Map<String, dynamic> pickup,
+    Map<String, dynamic> drop,
+  ) {
+    final pickupLat = (pickup['lat'] as num?)?.toDouble();
+    final pickupLng = (pickup['lng'] as num?)?.toDouble();
+    final dropLat = (drop['lat'] as num?)?.toDouble();
+    final dropLng = (drop['lng'] as num?)?.toDouble();
+    if (pickupLat == null ||
+        pickupLng == null ||
+        dropLat == null ||
+        dropLng == null) {
+      AppToast.warning(context, 'This trip cannot be rebooked.');
+      return;
+    }
+    final pickupAddress = (pickup['address'] ?? 'Pickup').toString();
+    final dropAddress = (drop['address'] ?? 'Drop').toString();
+    context.push(
+      '${RouteNames.vehicleSelection}?'
+      'pickupLat=$pickupLat&pickupLng=$pickupLng&pickupAddress=${Uri.encodeComponent(pickupAddress)}'
+      '&dropLat=$dropLat&dropLng=$dropLng&dropAddress=${Uri.encodeComponent(dropAddress)}',
+    );
   }
 
   String _money(dynamic value) =>

@@ -64,6 +64,56 @@ class _SafetyModePageState extends State<SafetyModePage> {
     );
   }
 
+  Future<void> _notifyContacts() async {
+    try {
+      final contacts = await FirebaseFirestore.instance
+          .collection('safetyContacts')
+          .where('userId', isEqualTo: _userId)
+          .get();
+      final phones = contacts.docs
+          .map((doc) => (doc.data()['phone'] as String? ?? '').trim())
+          .where((phone) => phone.isNotEmpty)
+          .toList();
+      if (phones.isEmpty) {
+        if (mounted) {
+          AppToast.warning(context, 'Add an emergency contact first.');
+        }
+        return;
+      }
+      var locationLine = '';
+      try {
+        var permission = await Geolocator.checkPermission();
+        if (permission == LocationPermission.denied) {
+          permission = await Geolocator.requestPermission();
+        }
+        if (permission == LocationPermission.always ||
+            permission == LocationPermission.whileInUse) {
+          final position = await Geolocator.getCurrentPosition(
+            timeLimit: const Duration(seconds: 4),
+          );
+          locationLine =
+              ' My live location: https://maps.google.com/?q=${position.latitude},${position.longitude}';
+        }
+      } catch (_) {}
+      final body =
+          'SOS from my PickDrop trip. I need help.$locationLine Please try to reach me now.';
+      final uri = Uri(
+        scheme: 'sms',
+        path: phones.join(','),
+        queryParameters: {'body': body},
+      );
+      if (await canLaunchUrl(uri)) {
+        await launchUrl(uri);
+      } else if (mounted) {
+        AppToast.error(context, 'Could not open your messaging app.');
+      }
+    } catch (_) {
+      if (mounted) {
+        AppToast.error(context, 'Could not open your messaging app.');
+      }
+    }
+  }
+
   Future<void> _addContact() async {
     final name = await AppDialog.showInput(
       context: context,
@@ -174,6 +224,15 @@ class _SafetyModePageState extends State<SafetyModePage> {
           ),
           const SizedBox(height: AppDimensions.spacingSm),
           HoldToCallSosButton(onComplete: _dialEmergency),
+          const SizedBox(height: AppDimensions.spacingMd),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: _notifyContacts,
+              icon: const Icon(Icons.sms_outlined),
+              label: const Text('Text emergency contacts'),
+            ),
+          ),
         ],
       ),
     );
@@ -203,7 +262,7 @@ class _SafetyModePageState extends State<SafetyModePage> {
                 ),
                 const SizedBox(height: AppDimensions.spacingXxs),
                 Text(
-                  'Emergency contacts are saved to your account and can be called from this screen. They are not automatically notified. Live tracking is shared only when you create a trip share link.',
+                  'Emergency contacts are saved to your account and can be called or texted from this screen. They are not notified automatically. Live tracking is shared only when you create a trip share link.',
                   style: AppTextStyles.bodySmall.copyWith(
                     color: colors.onSurfaceVariant,
                   ),

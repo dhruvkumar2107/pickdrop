@@ -28,6 +28,7 @@ class _DriverEarningsPageState extends State<DriverEarningsPage>
 
   double _todayEarnings = 0;
   final double _dailyGoal = 2000;
+  int _weeklyTrips = 0;
   List<Map<String, dynamic>> _transactions = [];
   List<BarChartGroupData> _barGroups = [];
   bool _loading = true;
@@ -57,6 +58,7 @@ class _DriverEarningsPageState extends State<DriverEarningsPage>
       final days = List<double>.filled(7, 0);
       final rows = <Map<String, dynamic>>[];
       var today = 0.0;
+      var weeklyTrips = 0;
       for (final doc in snapshot.docs) {
         final data = doc.data();
         final net = (data['net'] as num? ?? 0).toDouble();
@@ -68,7 +70,10 @@ class _DriverEarningsPageState extends State<DriverEarningsPage>
           now.day,
         ).difference(DateTime(date.year, date.month, date.day)).inDays;
         if (age == 0) today += net;
-        if (age >= 0 && age < 7) days[6 - age] += net;
+        if (age >= 0 && age < 7) {
+          days[6 - age] += net;
+          weeklyTrips++;
+        }
         rows.add({
           'id': doc.id,
           'amount': net,
@@ -83,6 +88,7 @@ class _DriverEarningsPageState extends State<DriverEarningsPage>
       if (!mounted) return;
       setState(() {
         _todayEarnings = today;
+        _weeklyTrips = weeklyTrips;
         _transactions = rows;
         _barGroups = [
           for (var i = 0; i < 7; i++)
@@ -395,10 +401,10 @@ class _DriverEarningsPageState extends State<DriverEarningsPage>
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
-                  children: const [
-                    LedgerSection(),
-                    SizedBox(height: AppDimensions.spacingXl),
-                    IncentivesSection(),
+                  children: [
+                    const LedgerSection(),
+                    const SizedBox(height: AppDimensions.spacingXl),
+                    IncentivesSection(weeklyTrips: _weeklyTrips),
                   ],
                 ),
               ),
