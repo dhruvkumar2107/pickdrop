@@ -1,4 +1,10 @@
 # Progress
+## Session - 2026-10-19 (driver profile + docs)
+- Rewrote `driver_profile_page.dart` from fabricated demo data (fake name/phone/vehicle/trips/documents) to real reads from `users` + `drivers` + `driverPrivate`: live name, phone, vehicle model/number/type, verification status, rating, total trips, earnings, and masked licence/RC with expiry. Driver logout now signs out of Firebase, Edit updates `displayName`, Language routes to the language page, and unverified/rejected drivers can reopen onboarding.
+- Language page copy now states English-only (matches DECISIONS.md); removed the "coming soon" language tile on the driver profile.
+- Refreshed stale `AUDIT.md` rows (emulators now switch SDKs, CI runs functions+rules jobs, rules are emulator-tested, 35 tests total) and the remaining-work bullets.
+- Gates: `flutter analyze` clean on changed files.
+
 ## Session - 2026-10-19 (latest continuation)
 - Real trip history (`my_trips` streams bookings) and trip detail (`tripDetail?bookingId=`) rebuilt on Firestore; router passes bookingId/driverId; trip-complete rating persists to `ratings`. Committed `22468b9`.
 - Verified stale claims against disk: saved addresses, safety contacts, driver payouts, wallet, chat, multi-stop server support, referral rewards, admin review page, and Razorpay/RazorpayX webhooks were already implemented in prior sessions.

@@ -127,12 +127,12 @@ Configuration: `.env` has Firebase project values and is loaded by `main.dart`; 
 | Commission/ledger | Done | `settleDeliveredTrip` idempotent ledger + driver earnings counters; first-20-trips commission-free (`trust.ts` `commissionFor`) |
 | Payout processing | Partial | Admin approval submits through RazorpayX, signed webhook marks terminal state, failed payouts release held funds, uncertain results retain reserve for reconciliation. |
 | Scheduled dispatch | Partial | Cron dispatch/reminders, multi-stop routing and stop OTPs are wired. Scheduled bookings currently accept cash only and no add-ons/coupons. |
-| Firestore rules | Partial | Default-deny and server-managed wallet/booking secrets; deploy and emulator validation remain. |
+| Firestore rules | Partial | Default-deny and server-managed wallet/booking secrets; emulator rules suite passes (13 tests); live deploy remains. |
 | Storage rules | Done | KYC docs owner-only; references `role == 'admin'` custom claim which nothing sets yet |
 | Admin operations | Partial | KYC/payout review and catalog seeding UI/callables exist; trusted claims are provisioned out-of-band; no general config editor. |
-| Emulators | Partial | Configured in `firebase.json`; `USE_FIREBASE_EMULATORS` flag exists in `.env`/`env_config.dart` but `main.dart` never switches SDKs |
-| CI | Partial | analyze/test/AAB pinned to Flutter 3.47.1; no functions build/test step |
-| Tests | Broken coverage | 7 Flutter tests (chat text, startup); zero rules/functions coverage; no fare/state-machine tests |
+| Emulators | Done | Configured in `firebase.json`; `main.dart` switches Auth/Firestore/Functions SDKs when `USE_FIREBASE_EMULATORS=true` |
+| CI | Done | `release.yml` jobs: Flutter 3.47.1 analyze/test/AAB, Functions build/test, and rules emulator run (Java 21) |
+| Tests | Partial | 7 Flutter + 15 Functions + 13 Firestore-rules tests pass; fare/state-machine unit coverage still thin |
 
 ### Android / platform
 
@@ -147,8 +147,8 @@ Configuration: `.env` has Firebase project values and is loaded by `main.dart`; 
 
 ## Remaining work and launch gates
 
-- User-facing gaps still in scope: account deletion, rebooking, outbound emergency-contact notifications, complete localization, driver incentive accuracy, and richer trip/driver history. Scheduled multi-stop bookings currently exclude add-ons/coupons and use cash only.
+- User-facing gaps still in scope: richer trip/driver history. English-only UI is an accepted decision (Hindi/other languages deferred). Scheduled multi-stop bookings currently exclude add-ons/coupons and use cash only.
 - Shared tracking now uses bearer tokens and a public callable. Add owner revoke/expiry controls before broad launch; keep shared response limited to route/status/driver details.
 - The admin custom claim and live catalog initialization require a trusted administrator UID and fresh Firebase Admin credentials. Provider and Maps secrets are absent, so sandbox payment, payout, routing, and webhook tests cannot run yet.
-- Firestore emulator/rules validation, device testing, and release build/signing remain outstanding. Debug APK and Functions compilation pass; successful compilation does not establish live Firebase/provider readiness.
+- Firestore rules are emulator-validated (13 tests) and wired into CI; device testing and release build/signing remain outstanding. Debug APK and Functions compilation pass; successful compilation does not establish live Firebase/provider readiness.
 - Do not initiate live payouts during any validation. Use sandbox credentials and provider test beneficiaries only.
