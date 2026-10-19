@@ -12,13 +12,10 @@ class LanguagePage extends ConsumerWidget {
 
   static const List<_LanguageOption> _options = [
     _LanguageOption(code: 'en', name: 'English', nativeName: 'English'),
-    _LanguageOption(code: 'hi', name: 'Hindi', nativeName: 'हिन्दी'),
-    _LanguageOption(code: 'kn', name: 'Kannada', nativeName: 'ಕನ್ನಡ'),
   ];
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final current = ref.watch(localeProvider);
     final safeTop = MediaQuery.of(context).padding.top;
 
     return Scaffold(
@@ -54,45 +51,55 @@ class LanguagePage extends ConsumerWidget {
             ),
           ),
           Expanded(
-            child: ListView.separated(
+            child: ListView(
               padding: const EdgeInsets.all(AppDimensions.spacingXl),
-              itemCount: _options.length,
-              separatorBuilder: (_, _) =>
-                  const SizedBox(height: AppDimensions.spacingSm),
-              itemBuilder: (context, i) {
-                final option = _options[i];
-                final selected = current.languageCode == option.code;
-                return ListTile(
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(AppDimensions.radiusMd),
-                    side: BorderSide(
-                      color: selected ? AppColors.primary : AppColors.outline,
-                      width: selected ? 2 : 1,
-                    ),
-                  ),
-                  tileColor: selected
-                      ? AppColors.primaryContainer
-                      : Colors.white,
-                  title: Text(option.name, style: AppTextStyles.titleSmall),
-                  subtitle: Text(option.nativeName,
-                      style: AppTextStyles.bodySmall
-                          .copyWith(color: AppColors.onSurfaceVariant)),
-                  trailing: selected
-                      ? const Icon(Icons.check_circle_rounded,
-                          color: AppColors.primary)
-                      : null,
-                  onTap: () =>
-                      ref.read(localeProvider.notifier).setLocale(Locale(option.code)),
-                )
-                    .animate(delay: Duration(milliseconds: i * 80))
-                    .fadeIn()
-                    .slideX(begin: 0.1, end: 0);
-              },
+              children: [
+                for (var i = 0; i < _options.length; i++) ...[
+                  if (i > 0) const SizedBox(height: AppDimensions.spacingSm),
+                  _buildOption(context, ref, i),
+                ],
+                const SizedBox(height: AppDimensions.spacingLg),
+                Text(
+                  'More languages are coming soon. Hindi and Kannada are in translation.',
+                  style: AppTextStyles.bodySmall
+                      .copyWith(color: AppColors.onSurfaceVariant),
+                ),
+              ],
             ),
           ),
         ],
       ),
     );
+  }
+
+  Widget _buildOption(BuildContext context, WidgetRef ref, int i) {
+    final option = _options[i];
+    final current = ref.watch(localeProvider);
+    final selected = current.languageCode == option.code;
+    return ListTile(
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(AppDimensions.radiusMd),
+        side: BorderSide(
+          color: selected ? AppColors.primary : AppColors.outline,
+          width: selected ? 2 : 1,
+        ),
+      ),
+      tileColor: selected ? AppColors.primaryContainer : Colors.white,
+      title: Text(option.name, style: AppTextStyles.titleSmall),
+      subtitle: Text(
+        option.nativeName,
+        style: AppTextStyles.bodySmall
+            .copyWith(color: AppColors.onSurfaceVariant),
+      ),
+      trailing: selected
+          ? const Icon(Icons.check_circle_rounded, color: AppColors.primary)
+          : null,
+      onTap: () =>
+          ref.read(localeProvider.notifier).setLocale(Locale(option.code)),
+    )
+        .animate(delay: Duration(milliseconds: i * 80))
+        .fadeIn()
+        .slideX(begin: 0.1, end: 0);
   }
 }
 

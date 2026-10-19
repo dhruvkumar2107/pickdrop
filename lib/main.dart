@@ -71,7 +71,7 @@ class PickDropApp extends ConsumerWidget {
         GlobalWidgetsLocalizations.delegate,
         GlobalCupertinoLocalizations.delegate,
       ],
-      supportedLocales: const [Locale('en'), Locale('hi'), Locale('kn')],
+      supportedLocales: const [Locale('en')],
       locale: locale,
       builder: (context, child) {
         final media = MediaQuery.of(context);
