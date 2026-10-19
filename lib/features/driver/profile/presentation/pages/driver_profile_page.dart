@@ -319,17 +319,26 @@ class _DriverProfilePageState extends State<DriverProfilePage> {
                         _MenuRowData(
                           icon: Icons.support_agent_rounded,
                           title: AppStrings.helpSupport,
-                          onTap: () => _showComingSoon(AppStrings.helpSupport),
+                          onTap: () {
+                            if (!mounted) return;
+                            context.go(RouteNames.helpSupport);
+                          },
                         ),
                         _MenuRowData(
                           icon: Icons.help_outline_rounded,
                           title: AppStrings.faqs,
-                          onTap: () => _showComingSoon(AppStrings.faqs),
+                          onTap: () {
+                            if (!mounted) return;
+                            context.go(RouteNames.helpSupport);
+                          },
                         ),
                         _MenuRowData(
                           icon: Icons.mail_outline_rounded,
                           title: AppStrings.contactUs,
-                          onTap: () => _showComingSoon(AppStrings.contactUs),
+                          onTap: () {
+                            if (!mounted) return;
+                            context.go(RouteNames.helpSupport);
+                          },
                         ),
                       ],
                     ),

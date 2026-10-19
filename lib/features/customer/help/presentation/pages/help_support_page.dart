@@ -225,30 +225,17 @@ class _CallbackTicketRow extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'Ticket #PD-2291',
+                  'Need a callback?',
                   style: AppTextStyles.labelLarge.copyWith(
                     color: colors.onSurface,
                     fontWeight: FontWeight.w600,
                   ),
                 ),
                 const SizedBox(height: 2),
-                Row(
-                  children: [
-                    const StatusChip(
-                      label: 'IN PROGRESS',
-                      status: AppChipStatus.active,
-                      dense: true,
-                    ),
-                    const SizedBox(width: AppDimensions.spacingXs),
-                    Flexible(
-                      child: Text(
-                        'Last reply 2 min ago',
-                        overflow: TextOverflow.ellipsis,
-                        style: AppTextStyles.labelSmall
-                            .copyWith(color: colors.onSurfaceVariant),
-                      ),
-                    ),
-                  ],
+                Text(
+                  'Our team reaches out within 5 minutes during support hours.',
+                  style: AppTextStyles.labelSmall
+                      .copyWith(color: colors.onSurfaceVariant),
                 ),
               ],
             ),

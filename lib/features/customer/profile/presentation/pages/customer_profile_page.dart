@@ -132,10 +132,10 @@ class _CustomerProfilePageState extends ConsumerState<CustomerProfilePage> {
       final message = error.message?.trim().isNotEmpty == true
           ? error.message!.trim()
           : 'Could not delete your account. Please try again.';
-      _showComingSoon(message);
+      _showInfo(message);
     } catch (_) {
       if (mounted) {
-        _showComingSoon('Could not delete your account. Please try again.');
+        _showInfo('Could not delete your account. Please try again.');
       }
     }
   }
@@ -181,7 +181,7 @@ class _CustomerProfilePageState extends ConsumerState<CustomerProfilePage> {
       if (mounted) setState(() => _name = name);
     } catch (_) {
       if (mounted) {
-        _showComingSoon('Could not update your profile. Please try again.');
+        _showInfo('Could not update your profile. Please try again.');
       }
     }
   }
@@ -190,11 +190,11 @@ class _CustomerProfilePageState extends ConsumerState<CustomerProfilePage> {
     ref.read(themeModeProvider.notifier).toggleTheme();
   }
 
-  void _showComingSoon(String feature) {
+  void _showInfo(String message) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(feature),
+        content: Text(message),
         behavior: SnackBarBehavior.floating,
         backgroundColor: context.colors.secondary,
       ),
@@ -328,7 +328,7 @@ class _CustomerProfilePageState extends ConsumerState<CustomerProfilePage> {
                   _SettingsItem(
                     icon: Icons.mail_outline_rounded,
                     title: AppStrings.contactUs,
-                    onTap: () => _showComingSoon('Contact us coming soon'),
+                    onTap: () => context.go(RouteNames.helpSupport),
                   ),
                 ],
               ),
@@ -351,12 +351,12 @@ class _CustomerProfilePageState extends ConsumerState<CustomerProfilePage> {
                     icon: Icons.description_outlined,
                     title: AppStrings.termsConditions,
                     onTap: () =>
-                        _showComingSoon('Terms & Conditions coming soon'),
+                        _showInfo('Terms & Conditions coming soon'),
                   ),
                   _SettingsItem(
                     icon: Icons.privacy_tip_outlined,
                     title: AppStrings.privacyPolicy,
-                    onTap: () => _showComingSoon('Privacy Policy coming soon'),
+                    onTap: () => _showInfo('Privacy Policy coming soon'),
                   ),
                 ],
               ),
