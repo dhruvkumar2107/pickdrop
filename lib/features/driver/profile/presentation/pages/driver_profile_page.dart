@@ -38,6 +38,8 @@ class _DriverProfilePageState extends State<DriverProfilePage> {
   String _vehicleNumber = '';
   String _vehicleModel = '';
   String _verificationStatus = '';
+  bool _isVerified = false;
+  bool _isAdmin = false;
 
   double _rating = 0;
   int _totalTrips = 0;
@@ -70,6 +72,7 @@ class _DriverProfilePageState extends State<DriverProfilePage> {
       final user = results[0].data() ?? const {};
       final driver = results[1].data() ?? const {};
       final kyc = results[2].data() ?? const {};
+      final token = await FirebaseAuth.instance.currentUser!.getIdTokenResult();
 
       DateTime? expiry(dynamic value) =>
           value is Timestamp ? value.toDate().toLocal() : null;
@@ -84,6 +87,8 @@ class _DriverProfilePageState extends State<DriverProfilePage> {
         _vehicleNumber = (driver['vehicleNumber'] as String?) ?? '';
         _vehicleModel = (driver['vehicleModel'] as String?) ?? '';
         _verificationStatus = (driver['verificationStatus'] as String?) ?? '';
+        _isVerified = driver['isVerified'] == true ||
+            _verificationStatus == 'VERIFIED';
         _totalTrips = (driver['totalTrips'] as num?)?.toInt() ?? 0;
         _rating = (driver['rating'] as num?)?.toDouble() ?? 0;
         _totalEarnings = (driver['totalEarnings'] as num?)?.toDouble() ?? 0;
@@ -93,18 +98,18 @@ class _DriverProfilePageState extends State<DriverProfilePage> {
         _rcExpiry = expiry(kyc['rcExpiry']);
         _hasKyc = kyc.isNotEmpty;
         _loading = false;
+        _isAdmin = token.claims?['role'] == 'admin';
       });
     } catch (_) {
       if (mounted) setState(() => _loading = false);
     }
   }
 
-  bool get _verified => _verificationStatus == 'APPROVED';
+  bool get _verified => _isVerified;
 
   String get _verificationLabel {
+    if (_verified) return 'Verified';
     switch (_verificationStatus) {
-      case 'APPROVED':
-        return 'Verified';
       case 'PENDING_REVIEW':
         return 'In review';
       case 'REJECTED':
@@ -344,6 +349,31 @@ class _DriverProfilePageState extends State<DriverProfilePage> {
                     ),
                   ),
                 ),
+                if (_isAdmin)
+                  SliverToBoxAdapter(
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(
+                        AppDimensions.spacingLg,
+                        AppDimensions.spacingXl,
+                        AppDimensions.spacingLg,
+                        0,
+                      ),
+                      child: _buildSection(
+                        colors: colors,
+                        title: 'Admin',
+                        items: [
+                          _MenuRowData(
+                            icon: Icons.admin_panel_settings_outlined,
+                            title: 'Admin console',
+                            onTap: () {
+                              if (!mounted) return;
+                              context.go(RouteNames.adminReview);
+                            },
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
                 SliverToBoxAdapter(
                   child: Padding(
                     padding: const EdgeInsets.fromLTRB(
@@ -525,7 +555,11 @@ class _DriverProfilePageState extends State<DriverProfilePage> {
           ],
           const SizedBox(height: AppDimensions.spacingMd),
           StatusChip.fromStatus(
-            _verificationStatus.isEmpty ? 'PENDING' : _verificationStatus,
+            _verified
+                ? 'APPROVED'
+                : (_verificationStatus.isEmpty
+                    ? 'PENDING'
+                    : _verificationStatus),
             label: _verificationLabel,
           ),
         ],

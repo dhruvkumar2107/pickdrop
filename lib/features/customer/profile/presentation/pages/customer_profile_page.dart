@@ -31,6 +31,7 @@ class _CustomerProfilePageState extends ConsumerState<CustomerProfilePage> {
   int _totalTrips = 0;
   int _savedAddresses = 0;
   double _walletBalance = 0;
+  bool _isAdmin = false;
 
   @override
   void initState() {
@@ -56,6 +57,7 @@ class _CustomerProfilePageState extends ConsumerState<CustomerProfilePage> {
           .count()
           .get();
       final wallet = await db.collection('wallets').doc(user.uid).get();
+      final token = await user.getIdTokenResult();
       if (!mounted) return;
       final data = profile.data() ?? <String, dynamic>{};
       setState(() {
@@ -68,6 +70,7 @@ class _CustomerProfilePageState extends ConsumerState<CustomerProfilePage> {
         _totalTrips = trips.count ?? 0;
         _savedAddresses = addresses.count ?? 0;
         _walletBalance = (wallet.data()?['balance'] as num?)?.toDouble() ?? 0;
+        _isAdmin = token.claims?['role'] == 'admin';
       });
     } catch (_) {
       if (!mounted) return;
@@ -334,6 +337,29 @@ class _CustomerProfilePageState extends ConsumerState<CustomerProfilePage> {
               ),
             ),
           ),
+          if (_isAdmin)
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(
+                  AppDimensions.spacingLg,
+                  AppDimensions.spacingMd,
+                  AppDimensions.spacingLg,
+                  0,
+                ),
+                child: _buildSection(
+                  context: context,
+                  colors: colors,
+                  title: 'Admin',
+                  items: [
+                    _SettingsItem(
+                      icon: Icons.admin_panel_settings_outlined,
+                      title: 'Admin console',
+                      onTap: () => context.go(RouteNames.adminReview),
+                    ),
+                  ],
+                ),
+              ),
+            ),
           SliverToBoxAdapter(
             child: Padding(
               padding: const EdgeInsets.fromLTRB(

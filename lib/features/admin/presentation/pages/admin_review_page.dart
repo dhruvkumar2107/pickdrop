@@ -85,9 +85,17 @@ class _AdminReviewPageState extends State<AdminReviewPage> {
           () => _error = e.message ?? 'Could not initialize vehicle pricing.',
         );
       }
+    } catch (_) {
+      if (mounted) {
+        setState(() => _error = 'Could not initialize vehicle pricing. Please retry.');
+      }
     } finally {
       if (mounted) setState(() => _busy = false);
     }
+  }
+
+  Future<void> _refresh() async {
+    await _checkRole();
   }
 
   Future<void> _editPricing(
@@ -183,8 +191,10 @@ class _AdminReviewPageState extends State<AdminReviewPage> {
             ),
           if (_busy) const LinearProgressIndicator(),
           Expanded(
-            child: ListView(
-              children: [
+            child: RefreshIndicator(
+              onRefresh: _refresh,
+              child: ListView(
+                children: [
                 _sectionTitle('Starter vehicle prices (INR)'),
                 StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
                   stream: FirebaseFirestore.instance
@@ -541,6 +551,7 @@ class _AdminReviewPageState extends State<AdminReviewPage> {
                 ),
               ],
             ),
+          ),
           ),
         ],
       ),
