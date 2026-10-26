@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:flutter/material.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:share_plus/share_plus.dart';
@@ -341,36 +342,49 @@ Track live: $trackingUrl
     final confirmed = await AppDialog.showConfirmation(
       context: context,
       title: 'Activate SOS?',
-      message: 'This will open your phone app to call emergency services. PickDrop will not notify a contact automatically.',
+      message: 'PickDrop safety will be alerted with this trip and your location, then your phone will call 112.',
       confirmText: 'Yes, activate SOS',
       isDestructive: true,
     );
 
-    if (!mounted) return;
-    if (confirmed ?? false) {
-      final uri = Uri(scheme: 'tel', path: '112');
-      if (await canLaunchUrl(uri)) {
-        await launchUrl(uri);
+    if (!mounted || !(confirmed ?? false)) return;
+    var alertRecorded = false;
+    try {
+      final payload = <String, dynamic>{};
+      final permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.always ||
+          permission == LocationPermission.whileInUse) {
+        final position = await Geolocator.getLastKnownPosition();
+        if (position != null) {
+          payload['latitude'] = position.latitude;
+          payload['longitude'] = position.longitude;
+        }
       }
+      await FirebaseFunctions.instanceFor(region: EnvConfig.functionsRegion)
+          .httpsCallable('createSosAlert')
+          .call(payload)
+          .timeout(const Duration(seconds: 5));
+      alertRecorded = true;
+    } catch (_) {
+      // The emergency call must still proceed if connectivity or location fails.
     }
+    await launchUrl(
+      Uri(scheme: 'tel', path: '112'),
+      mode: LaunchMode.externalApplication,
+    );
+    if (!mounted) return;
+    AppToast.warning(
+      context,
+      alertRecorded
+          ? 'Safety alert recorded. Calling 112 now.'
+          : 'Calling 112 now. Network alert could not be recorded.',
+    );
   }
 
   void _showProofFlow() {
-    final isPickup = _statusIndex < 2;
-    ProofOfDeliverySheet.show(
-      context,
-      bookingId: widget.bookingId ?? 'PD_ACTIVE',
-      isPickup: isPickup,
-      onProofCompleted: () {
-        if (!mounted) return;
-        AppToast.success(
-          context,
-          isPickup
-              ? 'Pickup proof verified successfully'
-              : 'Delivery proof recorded successfully',
-        );
-      },
-    );
+    final bookingId = widget.bookingId;
+    if (bookingId == null || bookingId.isEmpty) return;
+    ProofOfDeliverySheet.show(context, bookingId: bookingId);
   }
 
   Future<void> _cancelTrip() async {
@@ -988,9 +1002,7 @@ Track live: $trackingUrl
                 TextButton(
                   onPressed: _showProofFlow,
                   child: Text(
-                    _statusIndex >= 2
-                        ? 'Proof of delivery'
-                        : 'Capture pickup proof',
+                    'Goods photos',
                     style: TokenTextStyles.labelLarge(color: colors.primary),
                   ),
                 ),

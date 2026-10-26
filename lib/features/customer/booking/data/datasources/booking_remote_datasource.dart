@@ -158,17 +158,27 @@ class BookingRemoteDataSource {
     });
   }
 
-  Future<void> verifyPickupOtp(String bookingId, String otp) async {
+  Future<void> verifyPickupOtp(
+    String bookingId,
+    String otp, {
+    String? proofPath,
+  }) async {
     await _functions.httpsCallable('verifyPickupOtp').call({
       'bookingId': bookingId,
       'otp': otp,
+      'proofPath': ?proofPath,
     });
   }
 
-  Future<void> verifyDropOtp(String bookingId, String otp) async {
+  Future<void> verifyDropOtp(
+    String bookingId,
+    String otp, {
+    String? proofPath,
+  }) async {
     await _functions.httpsCallable('verifyDropOtp').call({
       'bookingId': bookingId,
       'otp': otp,
+      'proofPath': ?proofPath,
     });
   }
 

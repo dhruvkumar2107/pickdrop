@@ -225,16 +225,11 @@ class _TripDetailPageState extends State<TripDetailPage> {
                       children: [
                         _ActionRow(
                           icon: Icons.verified_outlined,
-                          label: 'Proof of delivery',
-                          subtitle: 'Photo & receiver acknowledgment',
+                          label: 'Goods photos',
+                          subtitle: 'Taken by the driver at pickup and drop',
                           onTap: () => ProofOfDeliverySheet.show(
                             context,
                             bookingId: bookingId,
-                            isPickup: false,
-                            onProofCompleted: () => AppToast.success(
-                              context,
-                              'Delivery proof & digital receipt recorded!',
-                            ),
                           ),
                         ),
                         if (data['transitInsurance'] == true) ...[

@@ -35,6 +35,14 @@ class EnvConfig {
         : 'https://$projectId.web.app';
   }
 
+  /// Where the Terms and Privacy pages are hosted (web/legal/*.html is
+  /// deployed to Firebase Hosting with the web build).
+  static String get legalBaseUrl {
+    final configured = dotenv.env['LEGAL_BASE_URL'] ?? '';
+    if (configured.isNotEmpty) return configured.replaceAll(RegExp(r'/+$'), '');
+    return '$trackingBaseUrl/legal';
+  }
+
   static bool get isFirebaseConfigured =>
       firebaseApiKey.isNotEmpty &&
       firebaseAuthDomain.isNotEmpty &&

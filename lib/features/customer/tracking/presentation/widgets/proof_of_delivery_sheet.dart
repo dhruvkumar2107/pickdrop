@@ -1,90 +1,39 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
 import '../../../../../../core/constants/colors.dart';
 import '../../../../../../core/constants/dimensions.dart';
 import '../../../../../../core/theme/text_styles.dart';
-import '../../../../../../core/widgets/app_toast.dart';
-import '../../../../../../core/widgets/gradient_button.dart';
 
-class ProofOfDeliverySheet extends StatefulWidget {
+/// Shows the goods photos the driver took at pickup and drop. Photos are
+/// captured on the driver's active-trip screen and stored per booking.
+class ProofOfDeliverySheet extends StatelessWidget {
   final String bookingId;
-  final bool isPickup;
-  final VoidCallback onProofCompleted;
 
-  const ProofOfDeliverySheet({
-    super.key,
-    required this.bookingId,
-    required this.isPickup,
-    required this.onProofCompleted,
-  });
+  const ProofOfDeliverySheet({super.key, required this.bookingId});
 
-  static Future<void> show(
-    BuildContext context, {
-    required String bookingId,
-    required bool isPickup,
-    required VoidCallback onProofCompleted,
-  }) {
+  static Future<void> show(BuildContext context, {required String bookingId}) {
     return showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (_) => ProofOfDeliverySheet(
-        bookingId: bookingId,
-        isPickup: isPickup,
-        onProofCompleted: onProofCompleted,
-      ),
+      builder: (_) => ProofOfDeliverySheet(bookingId: bookingId),
     );
-  }
-
-  @override
-  State<ProofOfDeliverySheet> createState() => _ProofOfDeliverySheetState();
-}
-
-class _ProofOfDeliverySheetState extends State<ProofOfDeliverySheet> {
-  bool _photoCaptured = false;
-  final _receiverNameController = TextEditingController();
-  bool _isSubmitting = false;
-
-  @override
-  void dispose() {
-    _receiverNameController.dispose();
-    super.dispose();
-  }
-
-  void _simulateCapturePhoto() {
-    setState(() => _photoCaptured = true);
-    AppToast.success(context, 'Goods photo captured with GPS watermark');
-  }
-
-  void _submitProof() {
-    if (!_photoCaptured) {
-      AppToast.warning(context, 'Please capture goods photo first');
-      return;
-    }
-
-    setState(() => _isSubmitting = true);
-    Future.delayed(const Duration(milliseconds: 600), () {
-      if (!mounted) return;
-      setState(() => _isSubmitting = false);
-      Navigator.of(context).pop();
-      widget.onProofCompleted();
-      AppToast.success(
-        context,
-        widget.isPickup ? 'Pickup proof verified successfully' : 'Delivery proof & digital receipt recorded!',
-      );
-    });
   }
 
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    final bottomInset = MediaQuery.of(context).viewInsets.bottom;
 
     return Container(
-      padding: EdgeInsets.fromLTRB(
+      constraints: BoxConstraints(
+        maxHeight: MediaQuery.of(context).size.height * 0.85,
+      ),
+      padding: const EdgeInsets.fromLTRB(
         AppDimensions.spacingXl,
         AppDimensions.spacingLg,
         AppDimensions.spacingXl,
-        AppDimensions.spacingXl + bottomInset,
+        AppDimensions.spacingXl,
       ),
       decoration: BoxDecoration(
         color: colors.surfaceCard,
@@ -92,125 +41,133 @@ class _ProofOfDeliverySheetState extends State<ProofOfDeliverySheet> {
           top: Radius.circular(AppDimensions.radiusXl),
         ),
       ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Center(
-            child: Container(
-              width: 40,
-              height: 4,
-              decoration: BoxDecoration(
-                color: colors.outline,
-                borderRadius: BorderRadius.circular(AppDimensions.radiusFull),
-              ),
-            ),
-          ),
-          const SizedBox(height: AppDimensions.spacingLg),
-          Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(AppDimensions.spacingSm),
-                decoration: BoxDecoration(
-                  color: colors.primaryContainer,
-                  shape: BoxShape.circle,
-                ),
-                child: Icon(
-                  widget.isPickup ? Icons.camera_alt_outlined : Icons.verified_outlined,
-                  color: colors.primary,
-                  size: 22,
-                ),
-              ),
-              const SizedBox(width: AppDimensions.spacingMd),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      widget.isPickup ? 'Mandatory Pickup Goods Photo' : 'Proof of Delivery (POD)',
-                      style: AppTextStyles.titleMedium.copyWith(
-                        fontWeight: FontWeight.w700,
-                        color: colors.onSurface,
+      child: StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+        stream: FirebaseFirestore.instance
+            .collection('bookings')
+            .doc(bookingId)
+            .snapshots(),
+        builder: (context, snapshot) {
+          final data = snapshot.data?.data();
+          return SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Center(
+                  child: Container(
+                    width: 40,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: colors.outline,
+                      borderRadius: BorderRadius.circular(
+                        AppDimensions.radiusFull,
                       ),
                     ),
-                    Text(
-                      widget.isPickup
-                          ? 'Capture loaded goods in truck bed to guarantee condition'
-                          : 'Photo + receiver acknowledgment for dispute-free delivery',
-                      style: AppTextStyles.bodySmall.copyWith(
-                        color: colors.onSurfaceVariant,
-                        fontSize: 11,
-                      ),
-                    ),
-                  ],
+                  ),
                 ),
-              ),
-            ],
-          ),
-          const SizedBox(height: AppDimensions.spacingLg),
-          GestureDetector(
-            onTap: _simulateCapturePhoto,
-            child: Container(
-              height: 120,
-              width: double.infinity,
-              decoration: BoxDecoration(
-                color: _photoCaptured ? colors.successLight : colors.surfaceVariant,
-                borderRadius: BorderRadius.circular(AppDimensions.radiusMd),
-                border: Border.all(
-                  color: _photoCaptured ? colors.success : colors.outline,
-                  width: 1.5,
+                const SizedBox(height: AppDimensions.spacingLg),
+                Text(
+                  'Goods photos',
+                  style: AppTextStyles.titleMedium.copyWith(
+                    fontWeight: FontWeight.w700,
+                    color: colors.onSurface,
+                  ),
                 ),
-              ),
-              child: Center(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(
-                      _photoCaptured ? Icons.check_circle_rounded : Icons.add_a_photo_rounded,
-                      size: 36,
-                      color: _photoCaptured ? colors.success : colors.primary,
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      _photoCaptured ? 'Photo Attached (GPS & Timestamped)' : 'Tap to Take Goods Photo',
-                      style: AppTextStyles.labelMedium.copyWith(
-                        color: _photoCaptured ? colors.success : colors.primary,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ],
+                Text(
+                  'Taken by your driver at pickup and drop, before each code is accepted.',
+                  style: AppTextStyles.bodySmall.copyWith(
+                    color: colors.onSurfaceVariant,
+                  ),
                 ),
-              ),
+                const SizedBox(height: AppDimensions.spacingLg),
+                if (snapshot.hasError)
+                  const Text('Could not load this trip.')
+                else if (data == null)
+                  const LinearProgressIndicator()
+                else ...[
+                  _ProofPhoto(
+                    label: 'At pickup',
+                    path: data['pickupProofPath'] as String?,
+                    takenAt: data['pickupOtpVerifiedAt'],
+                  ),
+                  const SizedBox(height: AppDimensions.spacingLg),
+                  _ProofPhoto(
+                    label: 'At delivery',
+                    path: data['deliveryProofPath'] as String?,
+                    takenAt: data['dropOtpVerifiedAt'],
+                  ),
+                ],
+              ],
             ),
-          ),
-          if (!widget.isPickup) ...[
-            const SizedBox(height: AppDimensions.spacingMd),
-            Text(
-              'Receiver Name / Signature',
-              style: AppTextStyles.labelMedium.copyWith(color: colors.onSurface),
-            ),
-            const SizedBox(height: AppDimensions.spacingXs),
-            TextField(
-              controller: _receiverNameController,
-              decoration: InputDecoration(
-                hintText: 'e.g. Ramesh (Warehouse Manager)',
-                filled: true,
-                fillColor: colors.surfaceVariant,
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(AppDimensions.radiusMd),
-                  borderSide: BorderSide.none,
-                ),
-              ),
-            ),
-          ],
-          const SizedBox(height: AppDimensions.spacingXl),
-          GradientButton(
-            text: widget.isPickup ? 'Confirm Pickup Photo' : 'Complete Delivery with POD',
-            isLoading: _isSubmitting,
-            onPressed: _submitProof,
-          ),
-        ],
+          );
+        },
       ),
+    );
+  }
+}
+
+class _ProofPhoto extends StatelessWidget {
+  final String label;
+  final String? path;
+  final dynamic takenAt;
+
+  const _ProofPhoto({required this.label, this.path, this.takenAt});
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final time = takenAt is Timestamp
+        ? TimeOfDay.fromDateTime((takenAt as Timestamp).toDate()).format(context)
+        : null;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          time == null ? label : '$label · $time',
+          style: AppTextStyles.labelMedium.copyWith(color: colors.onSurface),
+        ),
+        const SizedBox(height: AppDimensions.spacingXs),
+        ClipRRect(
+          borderRadius: BorderRadius.circular(AppDimensions.radiusMd),
+          child: path == null
+              ? Container(
+                  height: 120,
+                  width: double.infinity,
+                  color: colors.surfaceVariant,
+                  alignment: Alignment.center,
+                  child: Text(
+                    'Not taken yet',
+                    style: AppTextStyles.bodySmall.copyWith(
+                      color: colors.onSurfaceVariant,
+                    ),
+                  ),
+                )
+              : FutureBuilder<String>(
+                  future: FirebaseStorage.instance.ref(path).getDownloadURL(),
+                  builder: (context, url) {
+                    if (url.hasError) {
+                      return const SizedBox(
+                        height: 120,
+                        child: Center(child: Text('Photo unavailable')),
+                      );
+                    }
+                    if (!url.hasData) {
+                      return const SizedBox(
+                        height: 200,
+                        child: Center(child: CircularProgressIndicator()),
+                      );
+                    }
+                    return Image.network(
+                      url.data!,
+                      height: 220,
+                      width: double.infinity,
+                      fit: BoxFit.cover,
+                    );
+                  },
+                ),
+        ),
+      ],
     );
   }
 }

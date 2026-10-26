@@ -3,6 +3,7 @@ import 'package:flutter_animate/flutter_animate.dart';
 import 'package:go_router/go_router.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 import '../../../../../../config/router/route_names.dart';
 import '../../../../../../core/constants/colors.dart';
@@ -13,6 +14,7 @@ import '../../../../../../core/widgets/buttons/buttons.dart';
 import '../../../../../../core/widgets/common/common.dart';
 import '../../../../../../core/widgets/dialogs/dialogs.dart';
 import '../../../../../../core/widgets/status_chip.dart';
+import '../../../../../../core/utils/legal_links.dart';
 
 /// Readable foreground colour for a given accent (adapts to light/dark themes).
 Color _onAccent(Color accent) =>
@@ -205,11 +207,6 @@ class _DriverProfilePageState extends State<DriverProfilePage> {
     context.push(RouteNames.driverOnboarding);
   }
 
-  void _showComingSoon(String feature) {
-    if (!mounted) return;
-    AppToast.info(context, '$feature is coming soon');
-  }
-
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
@@ -295,7 +292,7 @@ class _DriverProfilePageState extends State<DriverProfilePage> {
                         _MenuRowData(
                           icon: Icons.notifications_outlined,
                           title: 'Notifications',
-                          onTap: () => _showComingSoon('Notification settings'),
+                          onTap: () => openAppSettings(),
                         ),
                         _MenuRowData(
                           icon: Icons.language_rounded,
@@ -390,12 +387,13 @@ class _DriverProfilePageState extends State<DriverProfilePage> {
                           icon: Icons.description_outlined,
                           title: AppStrings.termsConditions,
                           onTap: () =>
-                              _showComingSoon(AppStrings.termsConditions),
+                              openLegalPage(context, LegalPage.terms),
                         ),
                         _MenuRowData(
                           icon: Icons.privacy_tip_outlined,
                           title: AppStrings.privacyPolicy,
-                          onTap: () => _showComingSoon(AppStrings.privacyPolicy),
+                          onTap: () =>
+                              openLegalPage(context, LegalPage.privacy),
                         ),
                       ],
                     ),

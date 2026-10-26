@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -8,6 +10,33 @@ import 'package:go_router/go_router.dart';
 import '../../config/router/route_names.dart';
 
 final GlobalKey<NavigatorState> appNavigatorKey = GlobalKey<NavigatorState>();
+
+/// Where a tapped notification should take the user, from its data payload.
+/// Shared by push taps and the in-app notifications inbox.
+String? routeForNotification(Map<String, dynamic> data) {
+  final type = data['type']?.toString();
+  final bookingId = data['bookingId']?.toString() ?? '';
+  final id = Uri.encodeComponent(bookingId);
+  switch (type) {
+    case 'driver_offer':
+      return bookingId.isEmpty ? null : '${RouteNames.incomingRequest}?bookingId=$id';
+    case 'booking_update':
+      if (bookingId.isEmpty) return RouteNames.myTrips;
+      const finished = ['DELIVERED', 'CANCELLED', 'NO_DRIVER_FOUND'];
+      return finished.contains(data['status'])
+          ? '${RouteNames.tripDetail}?bookingId=$id'
+          : '${RouteNames.liveTracking}?bookingId=$id';
+    case 'sos_alert':
+      if (bookingId.isEmpty) return null;
+      return data['recipientRole'] == 'driver'
+          ? '${RouteNames.activeTrip}?bookingId=$id'
+          : '${RouteNames.liveTracking}?bookingId=$id';
+    case 'support_reply':
+      return RouteNames.notifications;
+    default:
+      return null;
+  }
+}
 
 
 @pragma('vm:entry-point')
@@ -153,27 +182,29 @@ class NotificationService {
       notification.title,
       notification.body,
       details,
-      payload: message.data['bookingId'],
+      payload: jsonEncode(message.data),
     );
   }
 
   void _handleNotificationTap(RemoteMessage message) {
-    final bookingId = message.data['bookingId'];
-    if (bookingId != null) {
-      _navigateToBooking(bookingId);
-    }
+    _navigate(message.data);
   }
 
   void _handleNotificationAction(String? payload) {
-    if (payload != null) {
-      _navigateToBooking(payload);
+    if (payload == null) return;
+    try {
+      final data = jsonDecode(payload);
+      if (data is Map) _navigate(Map<String, dynamic>.from(data));
+    } catch (_) {
+      // Ignore payloads from older app versions.
     }
   }
 
-  void _navigateToBooking(String bookingId) {
+  void _navigate(Map<String, dynamic> data) {
+    final route = routeForNotification(data);
     final context = appNavigatorKey.currentContext;
-    if (context == null) return;
-    context.go('${RouteNames.incomingRequest}?bookingId=${Uri.encodeComponent(bookingId)}');
+    if (route == null || context == null) return;
+    context.go(route);
   }
 
   Future<void> _saveFcmToken(String token) async {

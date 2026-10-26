@@ -32,6 +32,23 @@ service firebase.storage {
       allow delete: if isOwner(uid);
     }
 
+    // Goods photos taken by the assigned driver at pickup and drop.
+    match /bookingProofs/{bookingId}/{fileName} {
+      function trip() {
+        return firestore.get(/databases/(default)/documents/bookings/$(bookingId)).data;
+      }
+      allow read: if signedIn()
+        && (request.auth.uid == trip().customerId
+          || request.auth.uid == trip().driverId
+          || request.auth.token.role == 'admin');
+      allow create, update: if signedIn()
+        && fileName in ['pickup.jpg', 'drop.jpg']
+        && request.auth.uid == trip().driverId
+        && trip().status in ['DRIVER_ASSIGNED', 'PICKED_UP']
+        && isImage();
+      allow delete: if false;
+    }
+
     // Everything else is not accessible from clients.
     match /{allPaths=**} {
       allow read, write: if false;

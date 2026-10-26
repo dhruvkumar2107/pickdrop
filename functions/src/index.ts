@@ -14,6 +14,7 @@ export {
 
 export { verifyPayment, createRazorpayOrder, createWalletTopupOrder, verifyWalletTopup, razorpayPaymentWebhook } from './payment';
 export { deleteAccount } from './account';
+export { notifyBookingStatus, createSupportTicket, respondToSupportTicket } from './notifications';
 export { submitTripRating } from './ratings';
 export { searchPlaces, getPlaceDetails } from './places';
 export {

@@ -117,9 +117,9 @@ service cloud.firestore {
       allow write: if false;
     }
     match /supportTickets/{id} {
-      allow read: if signedIn() && resource.data.customerId == request.auth.uid;
-      allow create: if signedIn() && request.resource.data.customerId == request.auth.uid;
-      allow update, delete: if false;
+      allow read: if (signedIn() && resource.data.customerId == request.auth.uid) || isAdmin();
+      // Created and answered only through createSupportTicket / respondToSupportTicket.
+      allow create, update, delete: if false;
     }
     match /safetyContacts/{id} {
       allow read: if signedIn() && resource.data.userId == request.auth.uid;

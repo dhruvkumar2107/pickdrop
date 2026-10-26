@@ -1,9 +1,16 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import '../../../../../config/env/env_config.dart';
 import '../../../../../core/constants/colors.dart';
 import '../../../../../core/constants/dimensions.dart';
 import '../../../../../core/theme/text_styles.dart';
 import '../../../../../core/widgets/app_toast.dart';
 
+/// Sends a support request to the PickDrop team (admin review console) and
+/// lists the user's earlier requests with any replies. Replies also arrive
+/// as notifications.
 class LiveChatSupportSheet extends StatefulWidget {
   final String? activeBookingId;
 
@@ -27,12 +34,13 @@ class LiveChatSupportSheet extends StatefulWidget {
 
 class _LiveChatSupportSheetState extends State<LiveChatSupportSheet> {
   final _messageController = TextEditingController();
-  final List<Map<String, dynamic>> _messages = [
-    {
-      'isUser': false,
-      'text': 'Hello! PickDrop Priority Support here. We answer active trips in under 3 minutes.',
-      'time': 'Just now',
-    },
+  String _category = 'TRIP';
+  bool _sending = false;
+
+  static const _quickIssues = [
+    ('Driver not moving', 'TRIP', 'My driver seems stopped and is not moving.'),
+    ('Asked extra cash', 'PAYMENT', 'The driver is asking for money above the app fare.'),
+    ('Goods damaged', 'DAMAGE', 'My goods were damaged during this trip.'),
   ];
 
   @override
@@ -41,39 +49,45 @@ class _LiveChatSupportSheetState extends State<LiveChatSupportSheet> {
     super.dispose();
   }
 
-  void _sendMessage([String? quickReply]) {
-    final text = quickReply ?? _messageController.text.trim();
-    if (text.isEmpty) return;
-
-    setState(() {
-      _messages.add({
-        'isUser': true,
-        'text': text,
-        'time': 'Just now',
-      });
-      if (quickReply == null) _messageController.clear();
-    });
-
-    Future.delayed(const Duration(seconds: 1), () {
-      if (!mounted) return;
-      setState(() {
-        _messages.add({
-          'isUser': false,
-          'text': 'We have received your priority message. An agent is reviewing your active trip details right now.',
-          'time': 'Just now',
-        });
-      });
-    });
-  }
-
-  void _requestInstantCallback() {
-    AppToast.success(context, 'Callback scheduled! An agent will call you in < 2 mins.');
+  Future<void> _send() async {
+    final text = _messageController.text.trim();
+    if (text.length < 5) {
+      AppToast.warning(context, 'Describe the issue in a few words.');
+      return;
+    }
+    setState(() => _sending = true);
+    try {
+      final bookingId = widget.activeBookingId;
+      await FirebaseFunctions.instanceFor(region: EnvConfig.functionsRegion)
+          .httpsCallable('createSupportTicket')
+          .call({
+            'message': text,
+            'category': _category,
+            if (bookingId != null && bookingId.isNotEmpty) 'bookingId': bookingId,
+          });
+      _messageController.clear();
+      if (mounted) {
+        AppToast.success(
+          context,
+          'Sent to PickDrop support. You will get a notification when we reply.',
+        );
+      }
+    } on FirebaseFunctionsException catch (e) {
+      if (mounted) {
+        AppToast.error(context, e.message ?? 'Could not send. Please try again.');
+      }
+    } catch (_) {
+      if (mounted) AppToast.error(context, 'Could not send. Please try again.');
+    } finally {
+      if (mounted) setState(() => _sending = false);
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
     final bottomInset = MediaQuery.of(context).viewInsets.bottom;
+    final uid = FirebaseAuth.instance.currentUser?.uid;
 
     return Container(
       height: MediaQuery.of(context).size.height * 0.75,
@@ -90,145 +104,110 @@ class _LiveChatSupportSheetState extends State<LiveChatSupportSheet> {
         ),
       ),
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Container(
-            width: 40,
-            height: 4,
-            decoration: BoxDecoration(
-              color: colors.outline,
-              borderRadius: BorderRadius.circular(AppDimensions.radiusFull),
+          Text('Message support', style: AppTextStyles.titleMedium),
+          Text(
+            widget.activeBookingId == null
+                ? 'Our team reads every request and replies in the app.'
+                : 'Your current trip is attached so we can check it quickly.',
+            style: AppTextStyles.bodySmall.copyWith(
+              color: colors.onSurfaceVariant,
             ),
           ),
           const SizedBox(height: AppDimensions.spacingMd),
-          Row(
+          Wrap(
+            spacing: AppDimensions.spacingSm,
             children: [
-              Container(
-                padding: const EdgeInsets.all(AppDimensions.spacingSm),
-                decoration: BoxDecoration(
-                  color: colors.primaryContainer,
-                  shape: BoxShape.circle,
+              for (final (label, category, message) in _quickIssues)
+                ActionChip(
+                  label: Text(label),
+                  onPressed: () => setState(() {
+                    _category = category;
+                    _messageController.text = message;
+                  }),
                 ),
-                child: Icon(Icons.support_agent_rounded, color: colors.primary, size: 20),
-              ),
-              const SizedBox(width: AppDimensions.spacingSm),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Text('Live Priority Support', style: AppTextStyles.titleMedium),
-                        const SizedBox(width: 6),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                          decoration: BoxDecoration(
-                            color: colors.successLight,
-                            borderRadius: BorderRadius.circular(AppDimensions.radiusXs),
-                          ),
-                          child: Text(
-                            'SLA < 3 MIN',
-                            style: AppTextStyles.labelSmall.copyWith(
-                              color: colors.success,
-                              fontSize: 9,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                    Text(
-                      widget.activeBookingId != null ? 'Trip: ${widget.activeBookingId}' : 'General Inquiries',
-                      style: AppTextStyles.bodySmall.copyWith(color: colors.onSurfaceVariant),
-                    ),
-                  ],
-                ),
-              ),
-              IconButton(
-                icon: const Icon(Icons.phone_callback_rounded),
-                tooltip: 'Request Callback',
-                color: colors.primary,
-                onPressed: _requestInstantCallback,
-              ),
             ],
           ),
-          const Divider(height: 16),
-          // Quick action chips
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Row(
-              children: [
-                ActionChip(
-                  label: const Text('Driver Stopped'),
-                  onPressed: () => _sendMessage('My driver seems stopped and is not moving.'),
-                ),
-                const SizedBox(width: 6),
-                ActionChip(
-                  label: const Text('Asked Extra Cash'),
-                  onPressed: () => _sendMessage('Driver is demanding extra money above price lock.'),
-                ),
-                const SizedBox(width: 6),
-                ActionChip(
-                  label: const Text('Emergency Assistance'),
-                  onPressed: () => _sendMessage('I need urgent assistance with my cargo.'),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: AppDimensions.spacingSm),
+          const SizedBox(height: AppDimensions.spacingMd),
+          Text('Your requests', style: AppTextStyles.labelLarge),
+          const SizedBox(height: AppDimensions.spacingXs),
           Expanded(
-            child: ListView.builder(
-              itemCount: _messages.length,
-              itemBuilder: (_, i) {
-                final msg = _messages[i];
-                final isUser = msg['isUser'] as bool;
-                return Align(
-                  alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
-                  child: Container(
-                    margin: const EdgeInsets.only(bottom: 8),
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                    constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.75),
-                    decoration: BoxDecoration(
-                      color: isUser ? colors.primary : colors.surfaceVariant,
-                      borderRadius: BorderRadius.circular(AppDimensions.radiusMd),
-                    ),
-                    child: Text(
-                      msg['text'] as String,
-                      style: AppTextStyles.bodyMedium.copyWith(
-                        color: isUser ? colors.onPrimary : colors.onSurface,
-                      ),
-                    ),
+            child: uid == null
+                ? const SizedBox.shrink()
+                : StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+                    stream: FirebaseFirestore.instance
+                        .collection('supportTickets')
+                        .where('customerId', isEqualTo: uid)
+                        .limit(20)
+                        .snapshots(),
+                    builder: (context, snapshot) {
+                      if (snapshot.hasError) {
+                        return const Text('Could not load your requests.');
+                      }
+                      final docs = [...?snapshot.data?.docs]
+                        ..sort((a, b) => _millis(b).compareTo(_millis(a)));
+                      if (docs.isEmpty) {
+                        return Text(
+                          'No requests yet.',
+                          style: AppTextStyles.bodySmall.copyWith(
+                            color: colors.onSurfaceVariant,
+                          ),
+                        );
+                      }
+                      return ListView(
+                        children: docs.map((doc) {
+                          final data = doc.data();
+                          final reply = data['reply'] as String?;
+                          return Card(
+                            child: ListTile(
+                              title: Text(data['message']?.toString() ?? ''),
+                              subtitle: Text(
+                                reply == null
+                                    ? 'Waiting for a reply'
+                                    : 'Support: $reply',
+                              ),
+                            ),
+                          );
+                        }).toList(),
+                      );
+                    },
                   ),
-                );
-              },
-            ),
           ),
           Row(
             children: [
               Expanded(
                 child: TextField(
                   controller: _messageController,
-                  decoration: InputDecoration(
-                    hintText: 'Type your message...',
-                    filled: true,
-                    fillColor: colors.surfaceVariant,
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(AppDimensions.radiusMd),
-                      borderSide: BorderSide.none,
-                    ),
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  minLines: 1,
+                  maxLines: 4,
+                  maxLength: 1000,
+                  decoration: const InputDecoration(
+                    hintText: 'Describe the issue',
+                    counterText: '',
                   ),
                 ),
               ),
-              const SizedBox(width: AppDimensions.spacingSm),
               IconButton(
-                icon: const Icon(Icons.send_rounded),
-                color: colors.primary,
-                onPressed: () => _sendMessage(),
+                tooltip: 'Send',
+                onPressed: _sending ? null : _send,
+                icon: _sending
+                    ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : Icon(Icons.send_rounded, color: colors.primary),
               ),
             ],
           ),
         ],
       ),
     );
+  }
+
+  static int _millis(QueryDocumentSnapshot<Map<String, dynamic>> doc) {
+    final created = doc.data()['createdAt'];
+    return created is Timestamp ? created.millisecondsSinceEpoch : 0;
   }
 }

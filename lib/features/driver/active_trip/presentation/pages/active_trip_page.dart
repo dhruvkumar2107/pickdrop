@@ -1,10 +1,13 @@
 import 'dart:async';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:go_router/go_router.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../../../../config/router/route_names.dart';
 import '../../../../customer/booking/data/datasources/booking_remote_datasource.dart';
@@ -14,17 +17,8 @@ import '../../../../../core/theme/text_styles.dart';
 
 class ActiveTripPage extends StatefulWidget {
   final String bookingId;
-  final String pickupAddress;
-  final String dropAddress;
-  final String customerName;
 
-  const ActiveTripPage({
-    super.key,
-    required this.bookingId,
-    this.pickupAddress = '12, MG Road, Bangalore',
-    this.dropAddress = 'Whitefield, Bangalore',
-    this.customerName = 'Customer',
-  });
+  const ActiveTripPage({super.key, required this.bookingId});
 
   @override
   State<ActiveTripPage> createState() => _ActiveTripPageState();
@@ -36,6 +30,10 @@ class _ActiveTripPageState extends State<ActiveTripPage> {
   StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _bookingSub;
   bool _isWorking = false;
   List<Map<String, dynamic>> _intermediateStops = [];
+  Map<String, dynamic> _pickup = const {};
+  Map<String, dynamic> _drop = const {};
+  String _customerName = 'Customer';
+  XFile? _proofPhoto;
 
   final List<_TripStep> _steps = [
     _TripStep(
@@ -77,9 +75,16 @@ class _ActiveTripPageState extends State<ActiveTripPage> {
                 .whereType<Map>()
                 .map((item) => Map<String, dynamic>.from(item))
                 .toList();
+            final name = (data['customerName'] as String? ?? '').trim();
             setState(() {
               _intermediateStops = stops;
-              if (status == 'PICKED_UP') _step = 2;
+              _pickup = Map<String, dynamic>.from(data['pickup'] as Map? ?? {});
+              _drop = Map<String, dynamic>.from(data['drop'] as Map? ?? {});
+              _customerName = name.isEmpty ? 'Customer' : name;
+              if (status == 'PICKED_UP' && _step != 2) {
+                _step = 2;
+                _proofPhoto = null;
+              }
             });
             if (status == 'DELIVERED') {
               context.go(RouteNames.driverHome);
@@ -118,10 +123,22 @@ class _ActiveTripPageState extends State<ActiveTripPage> {
       );
       return;
     }
+    if (_needsProofPhoto && _proofPhoto == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Take a photo of the goods before continuing.'),
+        ),
+      );
+      return;
+    }
     setState(() => _isWorking = true);
     try {
       if (_step == 1) {
-        await BookingRemoteDataSource().verifyPickupOtp(widget.bookingId, otp);
+        await BookingRemoteDataSource().verifyPickupOtp(
+          widget.bookingId,
+          otp,
+          proofPath: await _uploadProof('pickup'),
+        );
       } else if (_nextStop != null) {
         await BookingRemoteDataSource().verifyIntermediateStopOtp(
           widget.bookingId,
@@ -129,9 +146,14 @@ class _ActiveTripPageState extends State<ActiveTripPage> {
           otp,
         );
       } else {
-        await BookingRemoteDataSource().verifyDropOtp(widget.bookingId, otp);
+        await BookingRemoteDataSource().verifyDropOtp(
+          widget.bookingId,
+          otp,
+          proofPath: await _uploadProof('drop'),
+        );
       }
       _otpController.clear();
+      if (mounted) setState(() => _proofPhoto = null);
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -145,6 +167,55 @@ class _ActiveTripPageState extends State<ActiveTripPage> {
     } finally {
       if (mounted) setState(() => _isWorking = false);
     }
+  }
+
+  /// Goods photos protect both sides in damage disputes, so pickup and the
+  /// final drop require one. Intermediate stops are verified by code only.
+  bool get _needsProofPhoto => _step == 1 || (_step == 2 && _nextStop == null);
+
+  Future<void> _takeProofPhoto() async {
+    final photo = await ImagePicker().pickImage(
+      source: ImageSource.camera,
+      imageQuality: 60,
+      maxWidth: 1600,
+    );
+    if (photo != null && mounted) setState(() => _proofPhoto = photo);
+  }
+
+  Future<String> _uploadProof(String kind) async {
+    final path = 'bookingProofs/${widget.bookingId}/$kind.jpg';
+    await FirebaseStorage.instance.ref(path).putData(
+      await _proofPhoto!.readAsBytes(),
+      SettableMetadata(contentType: 'image/jpeg'),
+    );
+    return path;
+  }
+
+  /// Where the driver is heading for the current step.
+  Map<String, dynamic> get _destination =>
+      _step < 2 ? _pickup : (_nextStop ?? _drop);
+
+  Future<void> _openNavigation() async {
+    final lat = (_destination['lat'] as num?)?.toDouble();
+    final lng = (_destination['lng'] as num?)?.toDouble();
+    if (lat == null || lng == null) return;
+    final uri = Uri.parse(
+      'https://www.google.com/maps/dir/?api=1&destination=$lat,$lng&travelmode=driving',
+    );
+    if (!await launchUrl(uri, mode: LaunchMode.externalApplication) &&
+        mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Could not open maps on this phone.')),
+      );
+    }
+  }
+
+  void _openChat() {
+    HapticFeedback.lightImpact();
+    context.push(
+      '${RouteNames.chat}?bookingId=${Uri.encodeComponent(widget.bookingId)}'
+      '&peerName=${Uri.encodeComponent(_customerName)}&role=customer',
+    );
   }
 
   Map<String, dynamic>? get _nextStop {
@@ -163,11 +234,38 @@ class _ActiveTripPageState extends State<ActiveTripPage> {
       backgroundColor: const Color(0xFF14161A),
       body: Stack(
         children: [
-          // Map bg
+          // Destination, handed off to turn-by-turn navigation
           Container(
             color: const Color(0xFF1E2028),
-            child: const Center(
-              child: Icon(Icons.map, size: 80, color: Color(0xFF2D3038)),
+            alignment: const Alignment(0, -0.35),
+            padding: const EdgeInsets.symmetric(
+              horizontal: AppDimensions.spacingXl,
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(
+                  Icons.place_rounded,
+                  size: 40,
+                  color: Colors.white38,
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  _destination['address'] as String? ?? 'Loading address...',
+                  textAlign: TextAlign.center,
+                  maxLines: 3,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppTextStyles.bodyLarge.copyWith(color: Colors.white),
+                ),
+                const SizedBox(height: 12),
+                FilledButton.icon(
+                  onPressed: _destination['lat'] == null
+                      ? null
+                      : _openNavigation,
+                  icon: const Icon(Icons.navigation_rounded),
+                  label: const Text('Navigate'),
+                ),
+              ],
             ),
           ),
 
@@ -284,7 +382,7 @@ class _ActiveTripPageState extends State<ActiveTripPage> {
                         ),
                         child: Center(
                           child: Text(
-                            widget.customerName[0],
+                            _customerName[0].toUpperCase(),
                             style: AppTextStyles.headlineSmall.copyWith(
                               color: AppColors.primary,
                               fontWeight: FontWeight.w700,
@@ -298,7 +396,7 @@ class _ActiveTripPageState extends State<ActiveTripPage> {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              widget.customerName,
+                              _customerName,
                               style: AppTextStyles.titleLarge.copyWith(
                                 color: Colors.white,
                               ),
@@ -312,9 +410,9 @@ class _ActiveTripPageState extends State<ActiveTripPage> {
                           ],
                         ),
                       ),
-                      // Call button
+                      // Message button (keeps both phone numbers private)
                       GestureDetector(
-                        onTap: () => HapticFeedback.lightImpact(),
+                        onTap: _openChat,
                         child: Container(
                           padding: const EdgeInsets.all(10),
                           decoration: BoxDecoration(
@@ -323,7 +421,7 @@ class _ActiveTripPageState extends State<ActiveTripPage> {
                             shape: BoxShape.circle,
                           ),
                           child: const Icon(
-                            Icons.call_rounded,
+                            Icons.chat_rounded,
                             color: Color(0xFF22C55E),
                             size: 22,
                           ),
@@ -358,22 +456,16 @@ class _ActiveTripPageState extends State<ActiveTripPage> {
                             size: 18,
                           ),
                           const SizedBox(width: 8),
-                          Text(
-                            _step == 1
-                                ? 'Pickup code: '
-                                : _nextStop != null
-                                ? 'Stop ${_nextStop!['sequence']} code: '
-                                : 'Drop code: ',
-                            style: AppTextStyles.bodyMedium.copyWith(
-                              color: Colors.white70,
-                            ),
-                          ),
-                          Text(
-                            '',
-                            style: AppTextStyles.titleLarge.copyWith(
-                              color: AppColors.primary,
-                              letterSpacing: 4,
-                              fontWeight: FontWeight.w700,
+                          Flexible(
+                            child: Text(
+                              _step == 1
+                                  ? 'Ask the sender for the pickup code'
+                                  : _nextStop != null
+                                  ? 'Ask for the stop ${_nextStop!['sequence']} code'
+                                  : 'Ask the receiver for the drop code',
+                              style: AppTextStyles.bodyMedium.copyWith(
+                                color: Colors.white70,
+                              ),
                             ),
                           ),
                         ],
@@ -396,6 +488,26 @@ class _ActiveTripPageState extends State<ActiveTripPage> {
                         'Intermediate stop ${_nextStop!['sequence']}: ${_nextStop!['address'] ?? 'Pinned stop'}',
                         style: AppTextStyles.bodyMedium.copyWith(
                           color: Colors.white70,
+                        ),
+                      ),
+                    ],
+                    if (_needsProofPhoto) ...[
+                      const SizedBox(height: AppDimensions.spacingMd),
+                      OutlinedButton.icon(
+                        onPressed: _isWorking ? null : _takeProofPhoto,
+                        icon: Icon(
+                          _proofPhoto == null
+                              ? Icons.add_a_photo_rounded
+                              : Icons.check_circle_rounded,
+                          color: _proofPhoto == null
+                              ? Colors.white70
+                              : const Color(0xFF22C55E),
+                        ),
+                        label: Text(
+                          _proofPhoto == null
+                              ? 'Take goods photo (required)'
+                              : 'Photo ready - tap to retake',
+                          style: const TextStyle(color: Colors.white),
                         ),
                       ),
                     ],

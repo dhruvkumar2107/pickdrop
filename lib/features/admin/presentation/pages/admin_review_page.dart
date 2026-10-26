@@ -509,6 +509,49 @@ class _AdminReviewPageState extends State<AdminReviewPage> {
                     );
                   },
                 ),
+                _sectionTitle('Support requests'),
+                StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+                  stream: FirebaseFirestore.instance
+                      .collection('supportTickets')
+                      .where('status', isEqualTo: 'OPEN')
+                      .snapshots(),
+                  builder: (context, snapshot) {
+                    if (snapshot.hasError) {
+                      return const ListTile(
+                        title: Text('Could not load support requests.'),
+                      );
+                    }
+                    if (!snapshot.hasData) {
+                      return const LinearProgressIndicator();
+                    }
+                    if (snapshot.data!.docs.isEmpty) {
+                      return const ListTile(
+                        title: Text('No open support requests.'),
+                      );
+                    }
+                    return Column(
+                      children: snapshot.data!.docs.map((doc) {
+                        final data = doc.data();
+                        final message = data['message']?.toString() ?? '';
+                        return Card(
+                          child: ListTile(
+                            title: Text('${data['category'] ?? 'OTHER'}: $message'),
+                            subtitle: Text(
+                              'User ${data['customerId']} • trip ${data['bookingId'] ?? 'not attached'} • ${_date(data['createdAt'])}',
+                            ),
+                            isThreeLine: true,
+                            trailing: TextButton(
+                              onPressed: _busy
+                                  ? null
+                                  : () => _replyToTicket(doc.id, message),
+                              child: const Text('Reply'),
+                            ),
+                          ),
+                        );
+                      }).toList(),
+                    );
+                  },
+                ),
                 _sectionTitle('Refund requests'),
                 StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
                   stream: FirebaseFirestore.instance
@@ -556,6 +599,50 @@ class _AdminReviewPageState extends State<AdminReviewPage> {
         ],
       ),
     );
+  }
+
+  Future<void> _replyToTicket(String ticketId, String message) async {
+    final controller = TextEditingController();
+    final reply = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Reply and close'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(message),
+            const SizedBox(height: 12),
+            TextField(
+              controller: controller,
+              autofocus: true,
+              minLines: 2,
+              maxLines: 5,
+              maxLength: 1000,
+              decoration: const InputDecoration(
+                hintText: 'Reply the customer will see',
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, controller.text.trim()),
+            child: const Text('Send'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (reply == null || reply.length < 2) return;
+    await _review('respondToSupportTicket', {
+      'ticketId': ticketId,
+      'reply': reply,
+    });
   }
 
   Widget _sectionTitle(String text) => Padding(

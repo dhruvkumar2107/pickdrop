@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
@@ -112,9 +114,14 @@ class _PickupDropSelectionPageState extends ConsumerState<PickupDropSelectionPag
       return;
     }
     String recognizedText = '';
+    // Finish as soon as the recogniser reports a final result instead of
+    // always waiting out the full listening window.
+    final done = Completer<void>();
+    AppToast.info(context, 'Listening... say the address');
     await _speech.listen(
       onResult: (result) {
         recognizedText = result.recognizedWords;
+        if (result.finalResult && !done.isCompleted) done.complete();
       },
       listenOptions: SpeechListenOptions(
         listenFor: const Duration(seconds: 15),
@@ -122,7 +129,10 @@ class _PickupDropSelectionPageState extends ConsumerState<PickupDropSelectionPag
         localeId: 'en_IN',
       ),
     );
-    await Future.delayed(const Duration(seconds: 16));
+    await done.future.timeout(
+      const Duration(seconds: 16),
+      onTimeout: () => _speech.stop(),
+    );
     if (!mounted) return;
     if (recognizedText.trim().isNotEmpty) {
       final confirmed = await showDialog<bool>(

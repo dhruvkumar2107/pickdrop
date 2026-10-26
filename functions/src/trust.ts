@@ -160,7 +160,12 @@ export const createSosAlert = onCall<{ latitude?: number; longitude?: number; no
               ? 'A customer on your active trip requested emergency help.'
               : 'Your driver requested emergency help. Contact them and support if needed.',
           },
-          data: { type: 'sos_alert', bookingId: booking!.id, alertId: ref.id },
+          data: {
+            type: 'sos_alert',
+            bookingId: booking!.id,
+            alertId: ref.id,
+            recipientRole: role === 'customer' ? 'driver' : 'customer',
+          },
           android: { priority: 'high', notification: { channelId: 'booking_updates' } },
           apns: { payload: { aps: { sound: 'default' } } },
         });

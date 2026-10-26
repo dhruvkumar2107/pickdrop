@@ -1,4 +1,14 @@
 # Progress
+## Session - 2026-10-27 (launch-readiness pass)
+- Customer push + in-app inbox: new `notifyBookingStatus` trigger writes `notifications` and sends FCM on assigned/picked-up/delivered/cancelled/no-driver; drivers hear when a customer cancels an assigned trip. Notifications page now streams the inbox with mark-read.
+- Fixed notification tap routing (every tap went to the driver incoming-request screen); `routeForNotification` routes by type/status/recipient role.
+- Driver active trip: real pickup/drop/stop addresses from the booking (removed hardcoded MG Road/Whitefield), Google Maps navigation hand-off, chat-with-customer button (was a no-op call), required goods photo at pickup and final drop uploaded to `bookingProofs/{bookingId}/` and verified server-side in the OTP callables.
+- Customer "proof of delivery" sheet no longer simulates capture; it shows the driver's real photos.
+- Priority support sheet no longer fakes an agent reply/callback; it creates tickets via `createSupportTicket`, lists replies, and admins answer via `respondToSupportTicket` (lands in the customer inbox). Client writes to `supportTickets` are now denied.
+- Live-tracking SOS now records a `createSosAlert` incident (with last known location) before dialling 112.
+- Voice search returns on the final result instead of always blocking 16s.
+- Terms/Privacy open hosted `web/legal/*.html` (placeholders for legal entity, grievance officer, liability terms must be filled and legally reviewed). Driver notification settings open system settings.
+- Gates: `flutter analyze` clean, `flutter test` 11/11, Functions build + 20/20 tests. Added 2 rules tests; not run locally (firebase-tools needs Java 21, machine has 17) - CI runs them.
 ## Session - 2026-10-19 (driver profile + docs)
 - Rewrote `driver_profile_page.dart` from fabricated demo data (fake name/phone/vehicle/trips/documents) to real reads from `users` + `drivers` + `driverPrivate`: live name, phone, vehicle model/number/type, verification status, rating, total trips, earnings, and masked licence/RC with expiry. Driver logout now signs out of Firebase, Edit updates `displayName`, Language routes to the language page, and unverified/rejected drivers can reopen onboarding.
 - Language page copy now states English-only (matches DECISIONS.md); removed the "coming soon" language tile on the driver profile.

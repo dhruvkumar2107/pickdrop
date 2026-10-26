@@ -13,6 +13,7 @@ import '../../../../../../core/constants/colors.dart';
 import '../../../../../../core/constants/dimensions.dart';
 import '../../../../../../core/constants/strings.dart';
 import '../../../../../../core/theme/theme_provider.dart';
+import '../../../../../../core/utils/legal_links.dart';
 import '../../../../../../core/widgets/buttons/buttons.dart';
 import '../../../../../../core/widgets/common/common.dart';
 import '../../../../../../core/widgets/dialogs/dialogs.dart';
@@ -376,13 +377,12 @@ class _CustomerProfilePageState extends ConsumerState<CustomerProfilePage> {
                   _SettingsItem(
                     icon: Icons.description_outlined,
                     title: AppStrings.termsConditions,
-                    onTap: () =>
-                        _showInfo('Terms & Conditions coming soon'),
+                    onTap: () => openLegalPage(context, LegalPage.terms),
                   ),
                   _SettingsItem(
                     icon: Icons.privacy_tip_outlined,
                     title: AppStrings.privacyPolicy,
-                    onTap: () => _showInfo('Privacy Policy coming soon'),
+                    onTap: () => openLegalPage(context, LegalPage.privacy),
                   ),
                 ],
               ),

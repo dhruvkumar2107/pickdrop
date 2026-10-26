@@ -91,11 +91,11 @@ Configuration: `.env` has Firebase project values and is loaded by `main.dart`; 
 | Schedule later | Done | `createScheduledBooking`/`cancelScheduledBooking` callables + `dispatchScheduledBookings` cron + reminders |
 | Multi-stop | Partial | Up to five map-pinned stops with road-route pricing, dispatch, and sequential OTPs for immediate and scheduled cash bookings. Scheduled add-ons/coupons remain unsupported. |
 | Live tracking | Partial | Real booking/driver streams and booking-scoped chat; public web links use high-entropy bearer tokens and return limited trip/driver data. Token revocation/expiry and live validation remain. |
-| Status notifications | Partial | Driver offer FCM, token persistence, tap routing, and Android `booking_updates` channel are wired; device/background delivery and broader booking status notifications need validation. |
+| Status notifications | Partial | Driver offer FCM plus customer booking-status pushes and in-app inbox (`notifyBookingStatus`); typed tap routing. Physical-device/background delivery needs validation. |
 | Payments (Razorpay) | Partial | Booking payments and wallet top-ups verify/capture server-side; wallet has signed `payment.captured` webhook. A sandbox-formatted client key ID exists only in ignored `.env.client`, which the app does not load; active `.env` and server credentials/webhooks are missing. Refunds remain manual. |
 | Ratings | Partial | Callable validates delivered customer booking, enforces one rating per trip, updates driver average; live submission requires deployed Functions |
 | Order history | Partial | Customer history and booking detail read Firestore; refresh/rebook and richer driver/customer identity remain. |
-| Rebook | Missing | — |
+| Rebook | Done | Trip detail "Book again" reuses pickup/drop into vehicle selection |
 | SOS / safety | Partial | Owner-only emergency contacts; SOS records an incident, includes GPS when permitted, alerts the assigned driver, and is visible to admins. It still calls 112 directly; outbound SMS to stored emergency contacts needs a configured messaging provider. |
 | Promo codes | Partial | `coupons` page reads real collection; server validates on `createBooking` |
 | Referral | Done | Server-owned referral codes, self-referral/duplicate protection, and one-time ₹50 credits to both wallets after the referred user completes a delivery. |

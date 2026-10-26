@@ -2,6 +2,7 @@ import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import { onDocumentCreated, onDocumentUpdated } from 'firebase-functions/v2/firestore';
 import { Firestore, FieldValue, Timestamp } from 'firebase-admin/firestore';
 import { getFirestore } from 'firebase-admin/firestore';
+import { getStorage } from 'firebase-admin/storage';
 import { getConfig, AppConfig } from './config';
 import {
   calculateFare,
@@ -45,6 +46,19 @@ const requireAuth = (request: { auth?: { uid: string } }): string => {
   }
   return request.auth.uid;
 };
+
+/**
+ * Accepts a driver-uploaded goods photo only at the booking's expected
+ * Storage path (Storage rules restrict that path to the assigned driver).
+ */
+async function verifiedProofPath(bookingId: string, kind: 'pickup' | 'drop', provided: unknown): Promise<string | null> {
+  if (provided === undefined || provided === null || provided === '') return null;
+  const expected = `bookingProofs/${bookingId}/${kind}.jpg`;
+  if (provided !== expected) throw new HttpsError('invalid-argument', 'Unexpected proof photo location.');
+  const [exists] = await getStorage().bucket().file(expected).exists();
+  if (!exists) throw new HttpsError('failed-precondition', 'Proof photo upload did not complete. Retake the photo.');
+  return expected;
+}
 
 /** Loads pricing for a vehicle type from `vehicleTypes/{id}`. */
 export async function getVehiclePricing(
@@ -179,8 +193,12 @@ export const createBooking = onCall<CreateBookingRequest>({ secrets: [googleMaps
   const bookingSecretsRef = db.collection('bookingSecrets').doc(bookingRef.id);
   const walletRef = data.paymentMethod === 'wallet' ? db.collection('wallets').doc(uid) : null;
   const walletTxnRef = data.paymentMethod === 'wallet' ? db.collection('walletTransactions').doc(`booking_${bookingRef.id}`) : null;
+  const customerProfile = await db.collection('users').doc(uid).get();
+  // First name only: drivers see who to meet without receiving more personal data.
+  const customerName = String(customerProfile.data()?.displayName ?? '').trim().split(/\s+/)[0].slice(0, 40);
   const bookingData = {
     customerId: uid,
+    customerName,
     driverId: null,
     status: data.paymentMethod === 'razorpay' ? 'AWAITING_PAYMENT' : 'SEARCHING',
     vehicleTypeId: data.vehicleTypeId,
@@ -439,9 +457,11 @@ export const rejectOffer = onCall<{ bookingId: string }>(async (request) => {
 });
 
 /** Driver enters the customer's pickup OTP → status PICKED_UP. */
-export const verifyPickupOtp = onCall<{ bookingId: string; otp: string }>(async (request) => {
+export const verifyPickupOtp = onCall<{ bookingId: string; otp: string; proofPath?: string }>(async (request) => {
   const uid = requireAuth(request);
   const { bookingId, otp } = request.data ?? {};
+  if (!bookingId) throw new HttpsError('invalid-argument', 'bookingId required.');
+  const proofPath = await verifiedProofPath(bookingId, 'pickup', request.data?.proofPath);
   const db = getFirestore();
   const bookingRef = db.collection('bookings').doc(bookingId);
   const secretsRef = db.collection('bookingSecrets').doc(bookingId);
@@ -461,6 +481,7 @@ export const verifyPickupOtp = onCall<{ bookingId: string; otp: string }>(async 
       status: 'PICKED_UP',
       pickupOtpVerifiedAt: Timestamp.now(),
       tripStartedAt: Timestamp.now(),
+      ...(proofPath ? { pickupProofPath: proofPath } : {}),
       updatedAt: Timestamp.now(),
     });
   });
@@ -492,9 +513,11 @@ export const verifyIntermediateStopOtp = onCall<{ bookingId: string; otp: string
 });
 
 /** Driver enters the drop OTP → status DELIVERED (trip complete). */
-export const verifyDropOtp = onCall<{ bookingId: string; otp: string }>(async (request) => {
+export const verifyDropOtp = onCall<{ bookingId: string; otp: string; proofPath?: string }>(async (request) => {
   const uid = requireAuth(request);
   const { bookingId, otp } = request.data ?? {};
+  if (!bookingId) throw new HttpsError('invalid-argument', 'bookingId required.');
+  const proofPath = await verifiedProofPath(bookingId, 'drop', request.data?.proofPath);
   const db = getFirestore();
   const bookingRef = db.collection('bookings').doc(bookingId);
   const secretsRef = db.collection('bookingSecrets').doc(bookingId);
@@ -522,6 +545,7 @@ export const verifyDropOtp = onCall<{ bookingId: string; otp: string }>(async (r
       status: 'DELIVERED',
       dropOtpVerifiedAt: Timestamp.now(),
       completedAt: Timestamp.now(),
+      ...(proofPath ? { deliveryProofPath: proofPath } : {}),
       updatedAt: Timestamp.now(),
     });
   });

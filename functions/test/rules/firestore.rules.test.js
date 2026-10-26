@@ -221,3 +221,25 @@ test('unlisted collections are denied by default', async () => {
   await assertFails(as('alice').collection('walletTopupOrders').doc('o1').set({ userId: 'alice' }));
   await assertFails(as('alice').collection('secretStuff').doc('x').get());
 });
+
+test('supportTickets: owner and admin read, no client writes', async () => {
+  await seed(async (db) => {
+    await db.collection('supportTickets').doc('t1').set({ customerId: 'alice', message: 'Help', status: 'OPEN' });
+  });
+  await assertSucceeds(as('alice').collection('supportTickets').doc('t1').get());
+  await assertSucceeds(as('root', { role: 'admin' }).collection('supportTickets').doc('t1').get());
+  await assertFails(as('mallory').collection('supportTickets').doc('t1').get());
+  await assertFails(as('alice').collection('supportTickets').add({ customerId: 'alice', message: 'Direct write' }));
+  await assertFails(as('alice').collection('supportTickets').doc('t1').update({ status: 'RESOLVED' }));
+});
+
+test('notifications: owner reads and marks read, cannot edit content', async () => {
+  await seed(async (db) => {
+    await db.collection('notifications').doc('n1').set({ userId: 'alice', title: 'Delivered', isRead: false });
+  });
+  await assertSucceeds(as('alice').collection('notifications').doc('n1').get());
+  await assertFails(as('mallory').collection('notifications').doc('n1').get());
+  await assertSucceeds(as('alice').collection('notifications').doc('n1').update({ isRead: true }));
+  await assertFails(as('alice').collection('notifications').doc('n1').update({ title: 'Edited' }));
+  await assertFails(as('alice').collection('notifications').add({ userId: 'alice', title: 'Fake' }));
+});
