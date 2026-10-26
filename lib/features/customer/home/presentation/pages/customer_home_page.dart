@@ -614,18 +614,18 @@ class _CustomerHomePageState extends ConsumerState<CustomerHomePage> {
           Row(
             children: [
               _HeroStat(
-                value: '2.4M+',
-                label: 'Deliveries',
+                value: 'Upfront',
+                label: 'Locked fare',
               ),
               SizedBox(width: DesignTokens.spacingXl),
               _HeroStat(
-                value: '50K+',
-                label: 'Drivers',
+                value: 'OTP',
+                label: '+ goods photos',
               ),
               SizedBox(width: DesignTokens.spacingXl),
               _HeroStat(
-                value: '4.9★',
-                label: 'Rating',
+                value: 'Live',
+                label: 'Tracking',
               ),
             ],
           ),

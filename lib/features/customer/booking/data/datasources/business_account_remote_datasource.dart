@@ -1,133 +1,63 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
-class BusinessAccountSnapshot {
-  const BusinessAccountSnapshot({
+class BusinessProfile {
+  const BusinessProfile({
     this.companyName = '',
     this.gstin = '',
     this.billingEmail = '',
-    this.monthlyLimit = 0,
-    this.teamMembers = const [],
-    this.invoices = const [],
-    this.pendingBulkOrders = const [],
   });
 
   final String companyName;
   final String gstin;
   final String billingEmail;
-  final double monthlyLimit;
-  final List<Map<String, String>> teamMembers;
-  final List<Map<String, String>> invoices;
-  final List<Map<String, String>> pendingBulkOrders;
 
-  factory BusinessAccountSnapshot.fromMap(Map<String, dynamic> data) {
-    final members = data['teamMembers'];
-    final invoices = data['invoices'];
-    final pending = data['pendingBulkOrders'];
-    final limit = data['monthlyLimit'];
-    return BusinessAccountSnapshot(
-      companyName: data['companyName'] is String ? data['companyName'] as String : '',
-      gstin: data['gstin'] is String ? data['gstin'] as String : '',
-      billingEmail:
-          data['billingEmail'] is String ? data['billingEmail'] as String : '',
-      monthlyLimit: limit is num ? limit.toDouble() : 0,
-      teamMembers: members is List
-          ? [
-              for (final item in members)
-                if (item is Map)
-                  {
-                    'name': '${item['name'] ?? ''}',
-                    'email': '${item['email'] ?? ''}',
-                    'role': '${item['role'] ?? 'Member'}',
-                  },
-            ]
-          : const [],
-      invoices: invoices is List
-          ? [
-              for (final item in invoices)
-                if (item is Map)
-                  {
-                    'id': '${item['id'] ?? ''}',
-                    'month': '${item['month'] ?? ''}',
-                    'amount': '${item['amount'] ?? ''}',
-                    'status': '${item['status'] ?? ''}',
-                    'url': '${item['url'] ?? ''}',
-                  },
-            ]
-          : const [],
-      pendingBulkOrders: pending is List
-          ? [
-              for (final item in pending)
-                if (item is Map)
-                  {
-                    'pickup': '${item['pickup'] ?? ''}',
-                    'drop': '${item['drop'] ?? ''}',
-                    'goods': '${item['goods'] ?? ''}',
-                    'weight': '${item['weight'] ?? ''}',
-                    'status': '${item['status'] ?? ''}',
-                  },
-            ]
-          : const [],
-    );
-  }
+  factory BusinessProfile.fromMap(Map<String, dynamic> data) => BusinessProfile(
+        companyName: data['companyName'] as String? ?? '',
+        gstin: data['gstin'] as String? ?? '',
+        billingEmail: data['billingEmail'] as String? ?? '',
+      );
+}
+
+/// One delivered trip for the monthly business statement.
+class StatementTrip {
+  const StatementTrip({
+    required this.bookingId,
+    required this.completedAt,
+    required this.pickup,
+    required this.drop,
+    required this.total,
+    required this.gst,
+    required this.paymentMethod,
+  });
+
+  final String bookingId;
+  final DateTime completedAt;
+  final String pickup;
+  final String drop;
+  final double total;
+  final double gst;
+  final String paymentMethod;
 }
 
 class BusinessAccountRemoteDataSource {
   static const String collectionName = 'businessAccounts';
-  static const String invoiceBaseUrl = 'https://pickdrop.app/invoices/';
-  static const List<String> _monthNames = [
-    'January',
-    'February',
-    'March',
-    'April',
-    'May',
-    'June',
-    'July',
-    'August',
-    'September',
-    'October',
-    'November',
-    'December',
-  ];
+
+  /// Format accepted for a GSTIN: 2-digit state code, PAN, entity code, Z, checksum.
+  static final RegExp gstinPattern =
+      RegExp(r'^\d{2}[A-Z]{5}\d{4}[A-Z][1-9A-Z]Z[0-9A-Z]$');
 
   final FirebaseFirestore _firestore;
 
   BusinessAccountRemoteDataSource({FirebaseFirestore? firestore})
       : _firestore = firestore ?? FirebaseFirestore.instance;
 
-  static List<Map<String, String>> parseCsvRows(String text) {
-    final lines = text
-        .split('\n')
-        .map((line) => line.trim())
-        .where((line) => line.isNotEmpty)
-        .toList();
-    if (lines.isNotEmpty && lines.first.toLowerCase().contains('pickup')) {
-      lines.removeAt(0);
-    }
-    final rows = <Map<String, String>>[];
-    for (final line in lines) {
-      final cells = line.split(',').map((cell) => cell.trim()).toList();
-      if (cells.length < 4) continue;
-      rows.add({
-        'pickup': cells[0],
-        'drop': cells[1],
-        'goods': cells[2],
-        'weight': cells[3],
-        'status': 'QUEUED',
-      });
-    }
-    return rows;
-  }
-
-  static String invoiceUrlFor(String invoiceId) => '$invoiceBaseUrl$invoiceId';
-
   DocumentReference<Map<String, dynamic>> _doc(String ownerId) =>
       _firestore.collection(collectionName).doc(ownerId);
 
-  Future<BusinessAccountSnapshot?> fetch(String ownerId) async {
+  Future<BusinessProfile?> fetch(String ownerId) async {
     final doc = await _doc(ownerId).get();
     final data = doc.data();
-    if (data == null) return null;
-    return BusinessAccountSnapshot.fromMap(data);
+    return data == null ? null : BusinessProfile.fromMap(data);
   }
 
   Future<void> saveProfile({
@@ -135,77 +65,68 @@ class BusinessAccountRemoteDataSource {
     required String companyName,
     required String gstin,
     required String billingEmail,
-    double? monthlyLimit,
-  }) async {
-    await _doc(ownerId).set(
-      {
-        'ownerId': ownerId,
-        'companyName': companyName,
-        'gstin': gstin,
-        'billingEmail': billingEmail,
-        'monthlyLimit': ?monthlyLimit,
-        'updatedAt': FieldValue.serverTimestamp(),
-      },
-      SetOptions(merge: true),
-    );
+  }) {
+    return _doc(ownerId).set({
+      'ownerId': ownerId,
+      'companyName': companyName,
+      'gstin': gstin,
+      'billingEmail': billingEmail,
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
   }
 
-  Future<void> replaceTeamMembers(
-    String ownerId,
-    List<Map<String, String>> members,
-  ) async {
-    await _doc(ownerId).set(
-      {
-        'ownerId': ownerId,
-        'teamMembers': [
-          for (final member in members)
-            {
-              'name': member['name'] ?? '',
-              'email': member['email'] ?? '',
-              'role': member['role'] ?? 'Member',
-            },
-        ],
-        'updatedAt': FieldValue.serverTimestamp(),
-      },
-      SetOptions(merge: true),
-    );
+  /// Delivered trips completed in [month] (any day within it), newest first.
+  Future<List<StatementTrip>> deliveredTrips(String ownerId, DateTime month) async {
+    final start = DateTime(month.year, month.month);
+    final end = DateTime(month.year, month.month + 1);
+    final snapshot = await _firestore
+        .collection('bookings')
+        .where('customerId', isEqualTo: ownerId)
+        .where('status', isEqualTo: 'DELIVERED')
+        .limit(500)
+        .get();
+    final trips = <StatementTrip>[];
+    for (final doc in snapshot.docs) {
+      final data = doc.data();
+      final completed = data['completedAt'];
+      if (completed is! Timestamp) continue;
+      final at = completed.toDate();
+      if (at.isBefore(start) || !at.isBefore(end)) continue;
+      final fare = Map<String, dynamic>.from(data['fareBreakdown'] as Map? ?? {});
+      trips.add(StatementTrip(
+        bookingId: doc.id,
+        completedAt: at,
+        pickup: (data['pickup'] as Map?)?['address']?.toString() ?? '',
+        drop: (data['drop'] as Map?)?['address']?.toString() ?? '',
+        total: (fare['total'] as num?)?.toDouble() ?? 0,
+        gst: (fare['gst'] as num?)?.toDouble() ?? 0,
+        paymentMethod: data['paymentMethod']?.toString() ?? '',
+      ));
+    }
+    trips.sort((a, b) => b.completedAt.compareTo(a.completedAt));
+    return trips;
   }
 
-  Future<String> createInvoice({
-    required String ownerId,
-    required double amount,
-  }) async {
-    final now = DateTime.now();
-    final id = 'INV${now.millisecondsSinceEpoch}';
-    final invoice = {
-      'id': id,
-      'month': '${_monthNames[now.month - 1]} ${now.year}',
-      'amount': amount,
-      'status': 'READY',
-      'url': invoiceUrlFor(id),
-    };
-    await _doc(ownerId).set(
-      {
-        'ownerId': ownerId,
-        'invoices': FieldValue.arrayUnion([invoice]),
-        'updatedAt': FieldValue.serverTimestamp(),
-      },
-      SetOptions(merge: true),
-    );
-    return invoiceUrlFor(id);
-  }
-
-  Future<void> queueBulkOrders(
-    String ownerId,
-    List<Map<String, String>> orders,
-  ) async {
-    await _doc(ownerId).set(
-      {
-        'ownerId': ownerId,
-        'pendingBulkOrders': FieldValue.arrayUnion(orders),
-        'updatedAt': FieldValue.serverTimestamp(),
-      },
-      SetOptions(merge: true),
-    );
+  /// CSV statement of [trips]; quotes every field so addresses with commas stay intact.
+  static String statementCsv(BusinessProfile profile, List<StatementTrip> trips) {
+    String cell(Object value) => '"${value.toString().replaceAll('"', '""')}"';
+    final lines = <String>[
+      if (profile.companyName.isNotEmpty) cell('Company: ${profile.companyName}'),
+      if (profile.gstin.isNotEmpty) cell('GSTIN: ${profile.gstin}'),
+      ['Date', 'Booking ID', 'Pickup', 'Drop', 'Payment', 'GST (INR)', 'Total (INR)']
+          .map(cell)
+          .join(','),
+      for (final trip in trips)
+        [
+          trip.completedAt.toIso8601String().substring(0, 10),
+          trip.bookingId,
+          trip.pickup,
+          trip.drop,
+          trip.paymentMethod,
+          trip.gst.toStringAsFixed(2),
+          trip.total.toStringAsFixed(2),
+        ].map(cell).join(','),
+    ];
+    return '${lines.join('\n')}\n';
   }
 }

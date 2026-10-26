@@ -537,7 +537,7 @@ class _AdminReviewPageState extends State<AdminReviewPage> {
                           child: ListTile(
                             title: Text('${data['category'] ?? 'OTHER'}: $message'),
                             subtitle: Text(
-                              'User ${data['customerId']} • trip ${data['bookingId'] ?? 'not attached'} • ${_date(data['createdAt'])}',
+                              '${data['contactPhone'] ?? 'User ${data['customerId']}'} • trip ${data['bookingId'] ?? 'not attached'} • ${_date(data['createdAt'])}',
                             ),
                             isThreeLine: true,
                             trailing: TextButton(

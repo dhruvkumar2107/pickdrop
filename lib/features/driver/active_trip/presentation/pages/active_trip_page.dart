@@ -33,6 +33,7 @@ class _ActiveTripPageState extends State<ActiveTripPage> {
   Map<String, dynamic> _pickup = const {};
   Map<String, dynamic> _drop = const {};
   String _customerName = 'Customer';
+  List<String> _helperLocations = const [];
   XFile? _proofPhoto;
 
   final List<_TripStep> _steps = [
@@ -81,6 +82,9 @@ class _ActiveTripPageState extends State<ActiveTripPage> {
               _pickup = Map<String, dynamic>.from(data['pickup'] as Map? ?? {});
               _drop = Map<String, dynamic>.from(data['drop'] as Map? ?? {});
               _customerName = name.isEmpty ? 'Customer' : name;
+              _helperLocations = (data['helperLocations'] as List<dynamic>? ?? [])
+                  .whereType<String>()
+                  .toList();
               if (status == 'PICKED_UP' && _step != 2) {
                 _step = 2;
                 _proofPhoto = null;
@@ -257,6 +261,18 @@ class _ActiveTripPageState extends State<ActiveTripPage> {
                   overflow: TextOverflow.ellipsis,
                   style: AppTextStyles.bodyLarge.copyWith(color: Colors.white),
                 ),
+                if (_helperLocations.contains(_step < 2 ? 'pickup' : 'drop')) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    _step < 2
+                        ? 'Paid loading help booked: you load the goods here'
+                        : 'Paid unloading help booked: you unload the goods here',
+                    textAlign: TextAlign.center,
+                    style: AppTextStyles.bodySmall.copyWith(
+                      color: const Color(0xFFFBBF24),
+                    ),
+                  ),
+                ],
                 const SizedBox(height: 12),
                 FilledButton.icon(
                   onPressed: _destination['lat'] == null

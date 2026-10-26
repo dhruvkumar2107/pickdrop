@@ -61,8 +61,6 @@ class LiveTrackingPage extends StatefulWidget {
 
 class _LiveTrackingPageState extends State<LiveTrackingPage> {
   static const int _lastStep = 6;
-  static const String _defaultPickup = '123 MG Road, Bengaluru 560001';
-  static const String _defaultDrop = '456 Koramangala, Bengaluru 560034';
   LatLng get _pickupPoint =>
       LatLng(widget.pickupLat ?? 12.9716, widget.pickupLng ?? 77.5946);
   LatLng get _dropPoint =>
@@ -86,6 +84,10 @@ class _LiveTrackingPageState extends State<LiveTrackingPage> {
 
   String _vehicleDetails = '';
   String _driverPhone = '';
+  double _driverRating = 0;
+  String _bookingPickupAddress = '';
+  String _bookingDropAddress = '';
+  int _driverTrips = 0;
   String _pickupOtp = '';
   String _dropOtp = '';
   List<Map<String, dynamic>> _intermediateStops = [];
@@ -173,6 +175,12 @@ class _LiveTrackingPageState extends State<LiveTrackingPage> {
           ? (dropData['otp'] as String? ?? _dropOtp)
           : _dropOtp;
       _intermediateStops = stops;
+      if (pickupData is Map) {
+        _bookingPickupAddress = pickupData['address']?.toString() ?? '';
+      }
+      if (dropData is Map) {
+        _bookingDropAddress = dropData['address']?.toString() ?? '';
+      }
       if (driverId != null && driverId.isNotEmpty) _driverId = driverId;
       _step = switch (status) {
         'DRIVER_ASSIGNED' => 0,
@@ -199,23 +207,18 @@ class _LiveTrackingPageState extends State<LiveTrackingPage> {
                       .whereType<String>()
                       .where((value) => value.isNotEmpty)
                       .join(' • ');
+              _driverRating = (driver['rating'] as num?)?.toDouble() ?? 0;
+              _driverTrips = (driver['totalTrips'] as num?)?.toInt() ?? 0;
             });
-            FirebaseFirestore.instance
-                .collection('users')
-                .doc(driverId)
-                .get()
-                .then((userDoc) {
-                  if (!mounted) return;
-                  final user = userDoc.data();
-                  if (user != null) {
-                    setState(() {
-                      _driverName =
-                          user['displayName'] as String? ?? 'Your driver';
-                      _driverPhone = user['phoneNumber'] as String? ?? '';
-                    });
-                  }
-                });
           });
+    }
+    final assignedName = (data['driverName'] as String? ?? '').trim();
+    final assignedPhone = (data['driverPhone'] as String? ?? '').trim();
+    if (assignedName.isNotEmpty || assignedPhone.isNotEmpty) {
+      setState(() {
+        if (assignedName.isNotEmpty) _driverName = assignedName;
+        _driverPhone = assignedPhone;
+      });
     }
     if (status == 'DELIVERED' && !_completedRoute) {
       _completedRoute = true;
@@ -293,8 +296,12 @@ class _LiveTrackingPageState extends State<LiveTrackingPage> {
     return minutes;
   }
 
-  String get _pickupLabel => widget.pickupAddress ?? _defaultPickup;
-  String get _dropLabel => widget.dropAddress ?? _defaultDrop;
+  String get _pickupLabel =>
+      widget.pickupAddress ??
+      (_bookingPickupAddress.isEmpty ? 'Pickup' : _bookingPickupAddress);
+  String get _dropLabel =>
+      widget.dropAddress ??
+      (_bookingDropAddress.isEmpty ? 'Drop' : _bookingDropAddress);
 
   Future<void> _shareTrip() async {
     final bookingId = widget.bookingId;
@@ -303,14 +310,15 @@ class _LiveTrackingPageState extends State<LiveTrackingPage> {
       return;
     }
     try {
-      final response = await FirebaseFunctions.instanceFor(
-        region: EnvConfig.functionsRegion,
-      )
-          .httpsCallable('createPublicTrackingLink')
-          .call({'bookingId': bookingId});
-      final token = Map<String, dynamic>.from(response.data as Map)['token'] as String;
+      final response =
+          await FirebaseFunctions.instanceFor(region: EnvConfig.functionsRegion)
+              .httpsCallable('createPublicTrackingLink')
+              .call({'bookingId': bookingId});
+      final token =
+          Map<String, dynamic>.from(response.data as Map)['token'] as String;
       final trackingUrl = '${EnvConfig.trackingBaseUrl}/track/$token';
-      final shareText = '''
+      final shareText =
+          '''
 🚚 PickDrop Trip Tracking
 
 Driver: $_driverName
@@ -326,7 +334,9 @@ Track live: $trackingUrl
         ShareParams(text: shareText, subject: 'Share my PickDrop trip'),
       );
     } catch (_) {
-      if (mounted) AppToast.error(context, 'Could not create a tracking link. Try again.');
+      if (mounted) {
+        AppToast.error(context, 'Could not create a tracking link. Try again.');
+      }
     }
   }
 
@@ -737,8 +747,9 @@ Track live: $trackingUrl
                           DesignTokens.radiusFull,
                         ),
                       ),
+                      // Only KYC-approved drivers can go online and accept trips.
                       child: Text(
-                        'PRO',
+                        'VERIFIED',
                         style: TokenTextStyles.labelSmall(
                           color: colors.success,
                           weight: DesignTokens.wBold,
@@ -766,14 +777,16 @@ Track live: $trackingUrl
                     ),
                     SizedBox(width: DesignTokens.spacingXxs),
                     Text(
-                      '4.9',
+                      _driverRating > 0
+                          ? _driverRating.toStringAsFixed(1)
+                          : 'New driver',
                       style: TokenTextStyles.labelMedium(
                         color: colors.onSurface,
                       ),
                     ),
                     SizedBox(width: DesignTokens.spacingSm),
                     Text(
-                      '2,184 trips',
+                      _driverTrips == 1 ? '1 trip' : '$_driverTrips trips',
                       style: TokenTextStyles.labelMedium(
                         color: colors.onSurfaceVariant,
                       ),

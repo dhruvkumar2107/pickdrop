@@ -133,6 +133,9 @@ export const createBooking = onCall<CreateBookingRequest>({ secrets: [googleMaps
     : [];
   const helperFee = helpers.length === 2 ? 149 : helpers.length === 1 ? 79 : 0;
   const returnTripFee = data.returnTrip === true ? fare.distanceFare : 0;
+  if (data.transitInsurance === true && config.transitInsuranceEnabled !== true) {
+    throw new HttpsError('failed-precondition', 'Transit insurance is not available yet.');
+  }
   const insuranceFee = data.transitInsurance === true ? 29 : 0;
   const stopFee = stops.length * config.multiStopFee;
   const pricingSubtotal = fare.subtotal + stopFee;

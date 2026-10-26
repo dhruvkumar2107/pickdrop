@@ -176,13 +176,13 @@ class _HelpCenterSearchState extends State<HelpCenterSearch> {
           Icon(Icons.search_off_rounded, size: 36, color: colors.onSurfaceVariant),
           const SizedBox(height: AppDimensions.spacingSm),
           Text(
-            'No match — start a live chat instead',
+            'No match — message our support team',
             textAlign: TextAlign.center,
             style: AppTextStyles.labelLarge.copyWith(color: colors.onSurface),
           ),
           const SizedBox(height: AppDimensions.spacingXs),
           Text(
-            'Our priority agents reply in under 5 minutes during an active trip.',
+            'Requests sent during a trip include your trip details.',
             textAlign: TextAlign.center,
             style: AppTextStyles.bodySmall.copyWith(color: colors.onSurfaceVariant),
           ),

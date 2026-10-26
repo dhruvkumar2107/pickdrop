@@ -14,3 +14,5 @@
 - [ ] Complete privacy policy, consent/retention, GST/insurance/legal review, support/SOS escalation, Play declarations and staged rollout.
 - [ ] Fill every `[PLACEHOLDER]` in `web/legal/terms.html` and `web/legal/privacy.html` (legal entity, address, grievance officer, claim window, liability cap, jurisdiction) and have them legally reviewed. Run `flutter build web` before `firebase deploy --only hosting` so `/legal/*.html` is published, and use the privacy URL in the Play Console listing.
 - [ ] Device-test the driver pickup/drop goods photo upload (Storage rules read the booking via `firestore.get`) and customer booking-status pushes on a physical Android phone.
+- [ ] Transit insurance stays off (`config/app.transitInsuranceEnabled=false`) until a licensed insurer/intermediary contract defines cover, premium and claims; then update `transit_insurance_card.dart` copy to match the policy.
+- [ ] Device-test a driver going online on Android 14+ (location foreground service) and confirm location keeps updating while Google Maps navigation is in front.

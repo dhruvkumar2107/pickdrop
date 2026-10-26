@@ -11,6 +11,8 @@ export interface AppConfig {
   maxMatchingDurationMinutes: number;
   gstPercent: number;
   multiStopFee: number;
+  /** Off until a licensed insurance partner backs the cover sold in-app. */
+  transitInsuranceEnabled: boolean;
 }
 
 export const DEFAULT_CONFIG: AppConfig = {
@@ -23,6 +25,7 @@ export const DEFAULT_CONFIG: AppConfig = {
   maxMatchingDurationMinutes: 3,
   gstPercent: 5,
   multiStopFee: 65,
+  transitInsuranceEnabled: false,
 };
 
 /** Reads `config/app`, falling back to defaults for any missing field. */

@@ -90,6 +90,8 @@ class _BookingDetailsPageState extends ConsumerState<BookingDetailsPage> {
   bool _multiStopDelivery = false;
   bool _returnTrip = false;
   bool _isInsured = false;
+  // Server-controlled; stays hidden until an insurance partner is live.
+  bool _insuranceAvailable = false;
   final double _goodsValue = 5000;
   DateTime? _scheduledAt;
   List<DeliveryStop> _stops = [];
@@ -157,6 +159,14 @@ class _BookingDetailsPageState extends ConsumerState<BookingDetailsPage> {
   void initState() {
     super.initState();
     _razorpayService = RazorpayService();
+    FirebaseFirestore.instance.collection('config').doc('app').get().then(
+      (doc) {
+        if (mounted && doc.data()?['transitInsuranceEnabled'] == true) {
+          setState(() => _insuranceAvailable = true);
+        }
+      },
+      onError: (_) {},
+    );
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid != null) {
       _walletSubscription = FirebaseFirestore.instance
@@ -637,13 +647,15 @@ class _BookingDetailsPageState extends ConsumerState<BookingDetailsPage> {
                           ),
                         ),
                         SizedBox(height: DesignTokens.spacingLg),
-                        TransitInsuranceCard(
-                          isInsured: _isInsured,
-                          goodsValue: _goodsValue,
-                          onToggleInsurance: (v) =>
-                              setState(() => _isInsured = v),
-                        ),
-                        SizedBox(height: DesignTokens.spacingLg),
+                        if (_insuranceAvailable) ...[
+                          TransitInsuranceCard(
+                            isInsured: _isInsured,
+                            goodsValue: _goodsValue,
+                            onToggleInsurance: (v) =>
+                                setState(() => _isInsured = v),
+                          ),
+                          SizedBox(height: DesignTokens.spacingLg),
+                        ],
                         _buildSmartBookingOptions(colors),
                         SizedBox(height: DesignTokens.spacingLg),
                         _buildNotesSection(),
@@ -1276,7 +1288,6 @@ class _CouponSheet extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colors = context.colors;
     return Padding(
       padding: EdgeInsets.only(
         bottom: MediaQuery.of(context).viewInsets.bottom,
@@ -1301,13 +1312,6 @@ class _CouponSheet extends StatelessWidget {
             size: PDButtonSize.lg,
             isFullWidth: true,
             onPressed: () => onApply(controller.text),
-          ),
-          SizedBox(height: DesignTokens.spacingMd),
-          Center(
-            child: Text(
-              'Try PICK50 for ₹50 off',
-              style: TokenTextStyles.labelSmall(color: colors.onSurfaceVariant),
-            ),
           ),
         ],
       ),

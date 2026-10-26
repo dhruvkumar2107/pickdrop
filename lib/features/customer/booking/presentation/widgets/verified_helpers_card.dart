@@ -20,11 +20,10 @@ class _VerifiedHelpersCardState extends State<VerifiedHelpersCard> {
   static const double dropPrice = 79;
   static const double bundlePrice = 149;
 
+  // The assigned driver does the loading and is paid the fee with the trip.
   static const List<_Helper> _helpers = [
-    _Helper(id: 'helper_pickup_ravi', name: 'Ravi Kumar', role: 'pickup', rating: 4.9, jobs: 1240),
-    _Helper(id: 'helper_pickup_suresh', name: 'Suresh Babu', role: 'pickup', rating: 4.7, jobs: 980),
-    _Helper(id: 'helper_drop_anil', name: 'Anil Sharma', role: 'drop', rating: 4.8, jobs: 1510),
-    _Helper(id: 'helper_drop_manoj', name: 'Manoj Gupta', role: 'drop', rating: 4.6, jobs: 760),
+    _Helper(id: 'helper_pickup_driver', name: 'Driver loads goods at pickup', role: 'pickup'),
+    _Helper(id: 'helper_drop_driver', name: 'Driver unloads goods at drop', role: 'drop'),
   ];
 
   String? _pickupId;
@@ -81,14 +80,14 @@ class _VerifiedHelpersCardState extends State<VerifiedHelpersCard> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'Verified loading helpers',
+                      'Loading & unloading help',
                       style: AppTextStyles.titleSmall.copyWith(
                         fontWeight: FontWeight.w700,
                         color: colors.onSurface,
                       ),
                     ),
                     Text(
-                      'Transparent pricing - nothing to pay in cash later',
+                      'Paid in the app fare - nothing extra in cash',
                       style: AppTextStyles.bodySmall.copyWith(
                         color: colors.onSurfaceVariant,
                         fontSize: 11,
@@ -100,10 +99,10 @@ class _VerifiedHelpersCardState extends State<VerifiedHelpersCard> {
             ],
           ),
           const SizedBox(height: AppDimensions.spacingMd),
-          _sectionLabel('At pickup - ₹${pickupPrice.toStringAsFixed(0)} each', colors),
+          _sectionLabel('At pickup', colors),
           ..._helpers.where((h) => h.role == 'pickup').map((h) => _helperRow(h, colors)),
           const SizedBox(height: AppDimensions.spacingSm),
-          _sectionLabel('At drop - ₹${dropPrice.toStringAsFixed(0)} each', colors),
+          _sectionLabel('At drop', colors),
           ..._helpers.where((h) => h.role == 'drop').map((h) => _helperRow(h, colors)),
           const SizedBox(height: AppDimensions.spacingSm),
           const Divider(height: AppDimensions.spacingMd),
@@ -132,7 +131,7 @@ class _VerifiedHelpersCardState extends State<VerifiedHelpersCard> {
                 )
               else
                 StatusChip(
-                  label: _total == 0 ? 'NO HELPER SELECTED' : 'ONE HELPER ADDED',
+                  label: _total == 0 ? 'NOT ADDED' : 'HELP ADDED',
                   status: AppChipStatus.neutral,
                   showDot: false,
                 ),
@@ -187,59 +186,22 @@ class _VerifiedHelpersCardState extends State<VerifiedHelpersCard> {
                   color: selected ? colors.primary : colors.surfaceCard,
                   shape: BoxShape.circle,
                 ),
-                child: Text(
-                  helper.name.substring(0, 1),
-                  style: AppTextStyles.titleSmall.copyWith(
-                    color: selected ? colors.onPrimary : colors.onSurface,
-                    fontWeight: FontWeight.w700,
-                  ),
+                child: Icon(
+                  helper.role == 'pickup'
+                      ? Icons.upload_rounded
+                      : Icons.download_rounded,
+                  size: AppDimensions.iconSm,
+                  color: selected ? colors.onPrimary : colors.onSurface,
                 ),
               ),
               const SizedBox(width: AppDimensions.spacingSm),
               Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Flexible(
-                          child: Text(
-                            helper.name,
-                            overflow: TextOverflow.ellipsis,
-                            style: AppTextStyles.labelLarge.copyWith(
-                              color: colors.onSurface,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: AppDimensions.spacingXs),
-                        const StatusChip(
-                          label: 'ID VERIFIED',
-                          status: AppChipStatus.success,
-                          showDot: false,
-                          dense: true,
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 2),
-                    Row(
-                      children: [
-                        Icon(Icons.star_rounded, size: 14, color: colors.warning),
-                        const SizedBox(width: 2),
-                        Text(
-                          helper.rating.toStringAsFixed(1),
-                          style: AppTextStyles.labelSmall.copyWith(color: colors.onSurface),
-                        ),
-                        const SizedBox(width: AppDimensions.spacingSm),
-                        Icon(Icons.work_outline_rounded, size: 13, color: colors.onSurfaceVariant),
-                        const SizedBox(width: 3),
-                        Text(
-                          '${helper.jobs} jobs',
-                          style: AppTextStyles.labelSmall.copyWith(color: colors.onSurfaceVariant),
-                        ),
-                      ],
-                    ),
-                  ],
+                child: Text(
+                  helper.name,
+                  style: AppTextStyles.labelLarge.copyWith(
+                    color: colors.onSurface,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
               ),
               const SizedBox(width: AppDimensions.spacingXs),
@@ -272,14 +234,10 @@ class _Helper {
   final String id;
   final String name;
   final String role;
-  final double rating;
-  final int jobs;
 
   const _Helper({
     required this.id,
     required this.name,
     required this.role,
-    required this.rating,
-    required this.jobs,
   });
 }

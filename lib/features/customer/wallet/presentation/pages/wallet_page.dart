@@ -4,17 +4,14 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:razorpay_flutter/razorpay_flutter.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:go_router/go_router.dart';
-import 'package:share_plus/share_plus.dart';
 
 import '../../../../../../config/router/route_names.dart';
 import '../../../../../../core/constants/app_constants.dart';
 import '../../../../../../core/constants/colors.dart';
 import '../../../../../../core/constants/dimensions.dart';
 import '../../../../../../core/constants/strings.dart';
-import '../../../../../../core/utils/helpers.dart';
 import '../../../../../../core/widgets/app_bottom_sheet.dart';
 import '../../../../../../core/widgets/app_toast.dart';
 import '../../../../../../core/widgets/buttons/buttons.dart';
@@ -22,6 +19,7 @@ import '../../../../../../core/widgets/common/common.dart';
 import '../../../../../../core/widgets/glass_card.dart';
 import '../../../../../../core/widgets/gradient_button.dart';
 import '../../../../../../shared/services/razorpay_service.dart';
+import '../../../home/presentation/widgets/referral_banner.dart';
 
 class WalletPage extends StatefulWidget {
   const WalletPage({super.key});
@@ -219,25 +217,6 @@ class _WalletPageState extends State<WalletPage> {
     context.go(RouteNames.coupons);
   }
 
-  Future<void> _shareReferralCode() async {
-    final referralCode = AppHelpers.generateReferralCode('+919876543210');
-    final message =
-        'Use my PickDrop referral code $referralCode and get ₹50 off your first ride or delivery. Download the app and enter my code at checkout.';
-
-    await SharePlus.instance.share(
-      ShareParams(text: message, subject: 'PickDrop referral code'),
-    );
-    if (!mounted) return;
-    AppToast.success(context, 'Referral invite ready to share');
-  }
-
-  Future<void> _copyReferralCode() async {
-    final referralCode = AppHelpers.generateReferralCode('+919876543210');
-    await Clipboard.setData(ClipboardData(text: referralCode));
-    if (!mounted) return;
-    AppToast.success(context, 'Referral code copied: $referralCode');
-  }
-
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
@@ -255,7 +234,7 @@ class _WalletPageState extends State<WalletPage> {
                 AppDimensions.spacingLg,
                 0,
               ),
-              child: _buildReferralCard(context, colors),
+              child: const ReferralBanner(),
             ),
           ),
           SliverToBoxAdapter(
@@ -458,106 +437,6 @@ class _WalletPageState extends State<WalletPage> {
                 ),
               ],
             ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildReferralCard(BuildContext context, AppColorsExtension colors) {
-    final referralCode = AppHelpers.generateReferralCode('+919876543210');
-
-    return GlassCard(
-      radius: AppDimensions.radiusLg,
-      padding: const EdgeInsets.all(AppDimensions.spacingLg),
-      borderColor: colors.primary.withValues(alpha: 0.25),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(AppDimensions.spacingMd),
-                decoration: BoxDecoration(
-                  gradient: AppColors.brandGradient,
-                  borderRadius: BorderRadius.circular(AppDimensions.radiusMd),
-                ),
-                child: const Icon(
-                  Icons.group_add_rounded,
-                  color: Colors.white,
-                  size: AppDimensions.iconMd,
-                ),
-              ),
-              const SizedBox(width: AppDimensions.spacingMd),
-              Expanded(
-                child: Text(
-                  'Referral program',
-                  style: TextStyle(
-                    fontFamily: 'Poppins',
-                    fontSize: 15,
-                    fontWeight: FontWeight.w700,
-                    color: colors.onSurface,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: AppDimensions.spacingMd),
-          Text(
-            'Earn ₹50 when a friend uses your code on their first order.',
-            style: TextStyle(
-              fontFamily: 'Poppins',
-              fontSize: 13,
-              fontWeight: FontWeight.w500,
-              color: colors.onSurfaceVariant,
-            ),
-          ),
-          const SizedBox(height: AppDimensions.spacingMd),
-          Container(
-            padding: const EdgeInsets.symmetric(
-              horizontal: AppDimensions.spacingMd,
-              vertical: AppDimensions.spacingSm,
-            ),
-            decoration: BoxDecoration(
-              color: colors.primaryContainer,
-              borderRadius: BorderRadius.circular(AppDimensions.radiusMd),
-            ),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    referralCode,
-                    style: TextStyle(
-                      fontFamily: 'Poppins',
-                      fontSize: 22,
-                      fontWeight: FontWeight.w800,
-                      color: colors.primary,
-                      letterSpacing: 1.2,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: AppDimensions.spacingSm),
-                TextButton.icon(
-                  onPressed: _copyReferralCode,
-                  icon: const Icon(Icons.copy_rounded, size: 18),
-                  label: const Text('Copy'),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: AppDimensions.spacingMd),
-          Row(
-            children: [
-              Expanded(
-                child: GradientButton(
-                  text: 'Share invite',
-                  leadingIcon: Icons.share_rounded,
-                  height: AppDimensions.buttonHeightMd,
-                  borderRadius: AppDimensions.radiusMd,
-                  onPressed: _shareReferralCode,
-                ),
-              ),
-            ],
           ),
         ],
       ),

@@ -52,7 +52,10 @@ class _HelpSupportPageState extends State<HelpSupportPage> {
   }
 
   void _requestCallback() {
-    AppToast.info(context, 'Callbacks are not automated yet - tap Contact us to reach the team now.');
+    LiveChatSupportSheet.requestCallback(
+      context,
+      bookingId: widget.activeBookingId,
+    );
   }
 
   void _openInstantRefund() {
@@ -148,8 +151,8 @@ class _HelpSupportPageState extends State<HelpSupportPage> {
                     Expanded(
                       child: _ActionCard(
                         icon: Icons.chat_bubble_outline_rounded,
-                        title: 'Live chat',
-                        subtitle: 'Reply in 5 min',
+                        title: 'Message us',
+                        subtitle: 'Replies arrive in the app',
                         onTap: _openLiveChat,
                       ),
                     ),
@@ -233,7 +236,7 @@ class _CallbackTicketRow extends StatelessWidget {
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  'Our team reaches out within 5 minutes during support hours.',
+                  'We call your registered number during support hours.',
                   style: AppTextStyles.labelSmall
                       .copyWith(color: colors.onSurfaceVariant),
                 ),

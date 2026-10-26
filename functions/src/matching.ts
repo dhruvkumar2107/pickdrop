@@ -224,11 +224,13 @@ async function assignDriver(
 ): Promise<boolean> {
   const bookingRef = db.collection('bookings').doc(bookingId);
   const driverRef = db.collection('drivers').doc(driverId);
+  const driverUserRef = db.collection('users').doc(driverId);
 
   return db.runTransaction(async (tx) => {
-    const [bookingSnap, driverSnap] = await Promise.all([
+    const [bookingSnap, driverSnap, driverUserSnap] = await Promise.all([
       tx.get(bookingRef),
       tx.get(driverRef),
+      tx.get(driverUserRef),
     ]);
     if (bookingSnap.data()?.status !== 'SEARCHING') return false;
 
@@ -239,6 +241,8 @@ async function assignDriver(
       | {
           isMockLocation?: boolean;
           activeBookingId?: string;
+          vehicleModel?: string;
+          vehicleNumber?: string;
           currentLocation?: { latitude?: number; longitude?: number };
         }
       | undefined;
@@ -257,8 +261,14 @@ async function assignDriver(
     );
     if (distanceKm > 3) return false;
 
+    // Customers cannot read other users' profiles, so the assigned driver's
+    // contact details are copied onto the participant-only booking.
+    const driverUser = driverUserSnap.data();
     tx.update(bookingRef, {
       driverId,
+      driverName: String(driverUser?.displayName ?? '').slice(0, 80),
+      driverPhone: String(driverUser?.phoneNumber ?? ''),
+      driverVehicle: [driver?.vehicleModel, driver?.vehicleNumber].filter(Boolean).join(' • '),
       status: 'DRIVER_ASSIGNED',
       driverAssignedAt: Timestamp.now(),
       updatedAt: Timestamp.now(),

@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import 'package:lottie/lottie.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_functions/cloud_functions.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 import '../../../../../config/router/route_names.dart';
 import '../../../../../config/env/env_config.dart';
@@ -40,12 +41,7 @@ class TripCompletePage extends StatefulWidget {
 }
 
 class _TripCompletePageState extends State<TripCompletePage> {
-  static const double _distanceFare = 128;
-  static const double _timeFare = 46;
-  static const double _surgeFare = 30;
-  static const String _driverInitials = 'RS';
-  static const String _vehicleDetails = 'TVS Jupiter • KA 01 HB 2456';
-  static const String _bookingId = 'PD-2481';
+  Map<String, dynamic> _booking = const {};
 
   final ConfettiController _confettiController = ConfettiController(
     duration: const Duration(seconds: 5),
@@ -60,6 +56,15 @@ class _TripCompletePageState extends State<TripCompletePage> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _confettiController.play();
     });
+    final bookingId = widget.bookingId;
+    if (bookingId != null && bookingId.isNotEmpty) {
+      FirebaseFirestore.instance.collection('bookings').doc(bookingId).get().then(
+        (doc) {
+          if (mounted && doc.exists) setState(() => _booking = doc.data()!);
+        },
+        onError: (_) {},
+      );
+    }
   }
 
   @override
@@ -69,13 +74,40 @@ class _TripCompletePageState extends State<TripCompletePage> {
     super.dispose();
   }
 
-  double get _subtotal => _distanceFare + _timeFare + _surgeFare;
+  Map<String, dynamic> get _fare =>
+      Map<String, dynamic>.from(_booking['fareBreakdown'] as Map? ?? {});
 
-  double get _gst => _subtotal * AppConstants.defaultGstPercent / 100;
+  double _fareValue(String key) => (_fare[key] as num?)?.toDouble() ?? 0;
 
-  double get _total => widget.fare ?? (_subtotal + _gst);
+  /// Helpers, return trip, stops and insurance, shown as one line.
+  double get _extras =>
+      _fareValue('helperFee') +
+      _fareValue('returnTripFee') +
+      _fareValue('stopFee') +
+      _fareValue('insuranceFee');
 
-  String get _driverName => widget.driverName ?? 'Rahul Sharma';
+  double get _total =>
+      (_fare['total'] as num?)?.toDouble() ?? widget.fare ?? 0;
+
+  String get _driverName {
+    final name = (_booking['driverName'] as String? ?? widget.driverName ?? '')
+        .trim();
+    return name.isEmpty ? 'Your driver' : name;
+  }
+
+  String get _driverInitials => _driverName
+      .split(RegExp(r'\s+'))
+      .where((part) => part.isNotEmpty)
+      .take(2)
+      .map((part) => part[0].toUpperCase())
+      .join();
+
+  String get _vehicleDetails => _booking['driverVehicle'] as String? ?? '';
+
+  String get _bookingId {
+    final id = widget.bookingId ?? '';
+    return id.length > 8 ? id.substring(0, 8).toUpperCase() : id.toUpperCase();
+  }
 
   bool get _paidOnline =>
       (widget.paymentMethod ?? AppConstants.paymentRazorpay) !=
@@ -325,30 +357,37 @@ class _TripCompletePageState extends State<TripCompletePage> {
           const SizedBox(height: AppDimensions.spacingSm),
           _buildRow(
             colors,
+            label: 'Base fare',
+            value: '₹${_fareValue('baseFare').toStringAsFixed(0)}',
+          ),
+          _buildRow(
+            colors,
             label: AppStrings.distanceFare,
-            value: '₹${_distanceFare.toStringAsFixed(0)}',
+            value: '₹${_fareValue('distanceFare').toStringAsFixed(0)}',
           ),
           _buildRow(
             colors,
             label: AppStrings.timeFare,
-            value: '₹${_timeFare.toStringAsFixed(0)}',
+            value: '₹${_fareValue('timeFare').toStringAsFixed(0)}',
           ),
-          _buildRow(
-            colors,
-            label: AppStrings.surgeCharges,
-            value: '₹${_surgeFare.toStringAsFixed(0)}',
-          ),
+          if (_extras > 0)
+            _buildRow(
+              colors,
+              label: 'Add-ons & stops',
+              value: '₹${_extras.toStringAsFixed(0)}',
+            ),
           _buildRow(
             colors,
             label: AppStrings.gst,
-            value: '₹${_gst.toStringAsFixed(0)}',
+            value: '₹${_fareValue('gst').toStringAsFixed(0)}',
           ),
-          _buildRow(
-            colors,
-            label: AppStrings.discount,
-            value: '−₹0',
-            valueColor: colors.onSurfaceVariant,
-          ),
+          if (_fareValue('discount') > 0)
+            _buildRow(
+              colors,
+              label: AppStrings.discount,
+              value: '−₹${_fareValue('discount').toStringAsFixed(0)}',
+              valueColor: colors.success,
+            ),
           const SizedBox(height: AppDimensions.spacingSm),
           Container(
             height: 1,

@@ -1,11 +1,16 @@
 import 'dart:async';
 import 'dart:developer';
+import 'dart:ui';
 
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+
+import '../../config/firebase/firebase_options.dart';
 
 class LocationService {
   static final LocationService _instance = LocationService._internal();
@@ -57,6 +62,22 @@ class LocationService {
 
   @pragma('vm:entry-point')
   static void _onStart(ServiceInstance service) async {
+    // This runs in its own isolate: plugins and Firebase must be set up again
+    // here, otherwise every background location write fails.
+    DartPluginRegistrant.ensureInitialized();
+    try {
+      await dotenv.load(fileName: '.env');
+      if (Firebase.apps.isEmpty) {
+        await Firebase.initializeApp(
+          options: DefaultFirebaseOptions.currentPlatform,
+        );
+      }
+    } catch (e) {
+      log('Background location could not start Firebase: $e');
+      service.stopSelf();
+      return;
+    }
+
     final FlutterLocalNotificationsPlugin notifications = FlutterLocalNotificationsPlugin();
     final AndroidNotificationChannel channel = AndroidNotificationChannel(
       'location_updates',
@@ -79,7 +100,7 @@ class LocationService {
       service.stopSelf();
     });
 
-    Timer.periodic(const Duration(seconds: 5), (timer) async {
+    Timer.periodic(const Duration(seconds: 15), (timer) async {
       if (!(await _hasLocationPermission())) {
         timer.cancel();
         service.stopSelf();

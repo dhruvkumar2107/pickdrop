@@ -255,7 +255,7 @@ class _SchedulePickerSheetState extends State<SchedulePickerSheet> {
                   const SizedBox(width: AppDimensions.spacingSm),
                   Expanded(
                     child: Text(
-                      'Guaranteed driver assigned 30 min before your slot. No surge at the scheduled time.',
+                      'Fare is locked when you schedule. We start matching a driver 30 min before your slot.',
                       style: AppTextStyles.bodySmall
                           .copyWith(color: colors.onSurface, fontSize: 11),
                     ),

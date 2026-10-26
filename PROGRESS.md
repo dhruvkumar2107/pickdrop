@@ -1,4 +1,16 @@
 # Progress
+## Session - 2026-10-27 (continuation: honesty + reliability pass)
+- Customers could never see the driver's name or call them: live tracking read `users/{driverId}`, which rules deny. Matching now copies `driverName`/`driverPhone` onto the participant-only booking at assignment; tracking reads them plus the driver's real rating/trip count (removed hardcoded "4.9 / 2,184 trips / PRO").
+- Removed fabricated home hero stats ("2.4M+ deliveries / 50K+ drivers / 4.9") in favour of product facts.
+- Business account rebuilt: it was pre-filled with a fake company/team, wrote to a collection with no rule (every save failed), billed a hardcoded Rs 18,450 invoice on a non-existent domain, and queued CSV bulk orders nothing processed. Now: validated GST profile (new `businessAccounts` rule + rules test) and a real monthly statement of delivered trips exported as CSV.
+- Transit insurance (Rs 29, "cover up to Rs 50,000", "cashless in 24h") had no insurer behind it. Gated behind `config/app.transitInsuranceEnabled` (default false); server rejects the add-on and the app hides the card until a licensed partner exists.
+- Removed the non-existent PICK50 coupon hint; removed unbacked "reply in 5 min" / "driver guaranteed" promises. Callback requests now create `CALLBACK` support tickets with the verified phone number for admins.
+- Wallet referral shared a code derived from a hardcoded phone number (never registered, so friends' codes failed); it now uses the server-issued code via `ReferralBanner`.
+- Trip-complete receipt showed invented numbers for every trip (distance Rs 128, time Rs 46, surge Rs 30, booking PD-2481, driver "Rahul Sharma", vehicle "TVS Jupiter KA 01 HB 2456"); it now renders the booking's real fareBreakdown, driver name and vehicle (matching copies `driverVehicle` onto the booking).
+- Loading help listed four invented "verified helpers" with fake ratings/jobs; nobody was ever assigned. It is now "driver loads/unloads" at the same prices (the fee already reaches the driver via settlement), and the driver's active trip shows when paid loading help was booked.
+- Live tracking no longer falls back to "123 MG Road"/"456 Koramangala"; it uses the booking's addresses.
+- Gates: `flutter analyze` clean, `flutter test` 13/13, Functions build + 20/20, `flutter build apk --debug` passes (manifest merge verified).
+- Driver background location: the background isolate never initialised Firebase (all background writes failed) and the manifest lacked the Android 14 `location` foreground-service type. Both fixed; background interval 5s -> 15s.
 ## Session - 2026-10-27 (launch-readiness pass)
 - Customer push + in-app inbox: new `notifyBookingStatus` trigger writes `notifications` and sends FCM on assigned/picked-up/delivered/cancelled/no-driver; drivers hear when a customer cancels an assigned trip. Notifications page now streams the inbox with mark-read.
 - Fixed notification tap routing (every tap went to the driver incoming-request screen); `routeForNotification` routes by type/status/recipient role.

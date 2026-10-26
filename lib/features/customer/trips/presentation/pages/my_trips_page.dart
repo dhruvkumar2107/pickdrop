@@ -26,7 +26,7 @@ class _MyTripsPageState extends State<MyTripsPage> {
   static const List<String> _filters = ['All', 'Active', 'Completed'];
   int _selectedFilter = 0;
 
-  List<_MockTrip> _trips = const [];
+  List<_TripItem> _trips = const [];
   StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _bookingSub;
 
   @override
@@ -46,7 +46,7 @@ class _MyTripsPageState extends State<MyTripsPage> {
         final drop = data['drop'] as Map<String, dynamic>? ?? const {};
         final fare = data['fareBreakdown'] as Map<String, dynamic>? ?? const {};
         final createdAt = data['createdAt'];
-        return _MockTrip(
+        return _TripItem(
           id: doc.id,
           status: data['status'] as String? ?? 'UNKNOWN',
           pickup: pickup['address'] as String? ?? 'Pickup location',
@@ -80,7 +80,7 @@ class _MyTripsPageState extends State<MyTripsPage> {
     return normalized == 'COMPLETED' || normalized == 'DELIVERED';
   }
 
-  List<_MockTrip> get _filteredTrips {
+  List<_TripItem> get _filteredTrips {
     switch (_selectedFilter) {
       case 1:
         return _trips.where((t) => _isActiveStatus(t.status)).toList();
@@ -319,8 +319,8 @@ class _MyTripsPageState extends State<MyTripsPage> {
   }
 }
 
-class _MockTrip {
-  const _MockTrip({
+class _TripItem {
+  const _TripItem({
     required this.id,
     required this.status,
     required this.pickup,
@@ -346,7 +346,7 @@ class _PremiumTripCard extends StatelessWidget {
     this.onTap,
   });
 
-  final _MockTrip trip;
+  final _TripItem trip;
   final String formattedDate;
   final VoidCallback? onTap;
 

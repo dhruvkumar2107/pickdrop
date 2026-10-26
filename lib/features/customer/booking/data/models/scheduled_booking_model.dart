@@ -92,7 +92,7 @@ class ScheduledBookingModel {
       'status': status,
       'assignedDriverId': assignedDriverId,
       'createdAt': Timestamp.fromDate(createdAt),
-      'assignmentPromise': 'Driver guaranteed 30 minutes before scheduled time',
+      'assignmentPromise': 'Driver matching starts 30 minutes before scheduled time',
     };
   }
 

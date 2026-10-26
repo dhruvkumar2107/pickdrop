@@ -6,7 +6,6 @@ import '../../../../../core/constants/colors.dart';
 import '../../../../../core/constants/dimensions.dart';
 import '../../../../../core/theme/design_tokens.dart';
 import '../../../../../core/theme/text_styles.dart';
-import '../../../../../core/widgets/app_toast.dart';
 import '../../../../../core/widgets/glass_card.dart';
 import 'live_chat_support_sheet.dart';
 
@@ -25,7 +24,7 @@ class PriorityTripHelpCard extends StatelessWidget {
   }
 
   void _requestCallback(BuildContext context) {
-    AppToast.success(context, 'Callback requested - an agent will call you within 5 min.');
+    LiveChatSupportSheet.requestCallback(context, bookingId: bookingId);
   }
 
   void _openChat(BuildContext context) {
@@ -117,7 +116,7 @@ class PriorityTripHelpCard extends StatelessWidget {
                 const SizedBox(width: AppDimensions.spacingXs),
                 Expanded(
                   child: Text(
-                    'Reply within 5 min during your trip',
+                    'Your trip is attached to your request',
                     style: AppTextStyles.labelMedium.copyWith(
                       color: colors.onSurface,
                       fontWeight: FontWeight.w600,

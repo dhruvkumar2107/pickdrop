@@ -48,7 +48,7 @@ export function bookingStatusMessages(before: BookingSnapshot, after: BookingSna
   }
 }
 
-const SUPPORT_CATEGORIES = ['TRIP', 'PAYMENT', 'DAMAGE', 'ACCOUNT', 'OTHER'] as const;
+const SUPPORT_CATEGORIES = ['TRIP', 'PAYMENT', 'DAMAGE', 'ACCOUNT', 'CALLBACK', 'OTHER'] as const;
 export type SupportCategory = typeof SUPPORT_CATEGORIES[number];
 
 /** Validates and normalises a customer support message. Throws a plain Error with a user-safe message. */

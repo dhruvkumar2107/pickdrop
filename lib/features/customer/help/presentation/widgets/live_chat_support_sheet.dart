@@ -28,6 +28,34 @@ class LiveChatSupportSheet extends StatefulWidget {
     );
   }
 
+  /// Files a callback request; support calls the phone number on the account.
+  static Future<void> requestCallback(
+    BuildContext context, {
+    String? bookingId,
+  }) async {
+    try {
+      await FirebaseFunctions.instanceFor(region: EnvConfig.functionsRegion)
+          .httpsCallable('createSupportTicket')
+          .call({
+            'message': 'Please call me back.',
+            'category': 'CALLBACK',
+            if (bookingId != null && bookingId.isNotEmpty) 'bookingId': bookingId,
+          });
+      if (context.mounted) {
+        AppToast.success(
+          context,
+          'Callback requested. Our team will call your registered number.',
+        );
+      }
+    } on FirebaseFunctionsException catch (e) {
+      if (context.mounted) {
+        AppToast.error(context, e.message ?? 'Could not request a callback.');
+      }
+    } catch (_) {
+      if (context.mounted) AppToast.error(context, 'Could not request a callback.');
+    }
+  }
+
   @override
   State<LiveChatSupportSheet> createState() => _LiveChatSupportSheetState();
 }

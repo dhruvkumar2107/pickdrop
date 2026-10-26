@@ -243,3 +243,12 @@ test('notifications: owner reads and marks read, cannot edit content', async () 
   await assertFails(as('alice').collection('notifications').doc('n1').update({ title: 'Edited' }));
   await assertFails(as('alice').collection('notifications').add({ userId: 'alice', title: 'Fake' }));
 });
+
+test('businessAccounts: owner saves strict GST profile only', async () => {
+  const profile = { ownerId: 'alice', companyName: 'Acme', gstin: '', billingEmail: '' };
+  await assertSucceeds(as('alice').collection('businessAccounts').doc('alice').set(profile));
+  await assertSucceeds(as('alice').collection('businessAccounts').doc('alice').get());
+  await assertFails(as('mallory').collection('businessAccounts').doc('alice').get());
+  await assertFails(as('mallory').collection('businessAccounts').doc('alice').set({ ...profile, ownerId: 'alice' }));
+  await assertFails(as('alice').collection('businessAccounts').doc('alice').set({ ...profile, creditLimit: 100000 }));
+});

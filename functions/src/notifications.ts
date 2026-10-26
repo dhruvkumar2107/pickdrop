@@ -91,8 +91,11 @@ export const createSupportTicket = onCall(async (request) => {
   if (open.size >= MAX_OPEN_TICKETS) {
     throw new HttpsError('resource-exhausted', 'You already have open requests. Our team will reply to those first.');
   }
+  // Phone-auth tokens carry the verified number support needs for callbacks.
+  const phone = request.auth?.token.phone_number;
   const ref = await db.collection('supportTickets').add({
     customerId: uid,
+    contactPhone: typeof phone === 'string' ? phone : null,
     ...ticket,
     status: 'OPEN',
     createdAt: Timestamp.now(),

@@ -116,6 +116,20 @@ service cloud.firestore {
       allow read: if participant(resource.data) || isAdmin();
       allow write: if false;
     }
+    match /businessAccounts/{uid} {
+      allow read: if owner(uid) || isAdmin();
+      allow create, update: if owner(uid)
+        && request.resource.data.keys().hasOnly(['ownerId', 'companyName', 'gstin', 'billingEmail', 'updatedAt'])
+        && request.resource.data.ownerId == uid
+        && request.resource.data.companyName is string
+        && request.resource.data.companyName.size() > 0
+        && request.resource.data.companyName.size() <= 120
+        && request.resource.data.gstin is string
+        && request.resource.data.gstin.size() <= 15
+        && request.resource.data.billingEmail is string
+        && request.resource.data.billingEmail.size() <= 120;
+      allow delete: if false;
+    }
     match /supportTickets/{id} {
       allow read: if (signedIn() && resource.data.customerId == request.auth.uid) || isAdmin();
       // Created and answered only through createSupportTicket / respondToSupportTicket.

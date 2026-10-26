@@ -108,7 +108,7 @@ class _ScheduledBookingsPageState extends State<ScheduledBookingsPage> {
               child: EmptyState(
                 title: 'No scheduled deliveries',
                 message:
-                    'Plan up to 7 days ahead — driver guaranteed 30 min before.',
+                    'Plan up to 7 days ahead — fare locked when you book.',
                 icon: Icons.schedule_rounded,
                 actionText: 'Schedule a delivery',
                 onAction: _scheduleDelivery,
@@ -193,7 +193,7 @@ class _ScheduledBookingsPageState extends State<ScheduledBookingsPage> {
           ),
           const SizedBox(height: AppDimensions.spacingSm),
           Text(
-            'Up to 7 days ahead • Driver guaranteed 30 min before',
+            'Up to 7 days ahead • Matching starts 30 min before',
             style: AppTextStyles.bodySmall.copyWith(
               color: colors.onPrimary.withValues(alpha: 0.85),
             ),
